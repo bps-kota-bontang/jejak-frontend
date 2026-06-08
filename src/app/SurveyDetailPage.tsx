@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
   analyzeSurveyAssignments,
   fetchSurveyByPeriodId,
+  importSurveyAssignments,
   syncSurveyAssignments,
   updateSurvey,
 } from "@/services/survey";
-import { fetchSurveyRegions, syncSurveyRegions } from "@/services/region";
+import { connectSurveyToExtension } from "@/services/extension";
+import {
+  fetchSurveyRegions,
+  importSurveyRegions,
+  syncSurveyRegions,
+} from "@/services/region";
 import { fetchSystemFeatures } from "@/services/system";
 import type { Survey, UpdateSurveyRequest } from "@/types/survey";
 import type { SurveyRegion } from "@/types/region";
@@ -73,7 +79,6 @@ const defaultRegionCodeFilters: RegionCodeFilters = {
 
 const ALL_FILTER_VALUE = "__all__";
 const REGION_PAGE_SIZE = 10;
-
 function buildInitialRegionFilters(survey: Survey | null): RegionCodeFilters {
   const kdprov = survey?.region_level_1 || "";
   const kdkab = survey?.region_level_2 || "";
@@ -173,7 +178,12 @@ const SurveyDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<
-    "sync-region" | "sync-assignment" | null
+    | "sync-region-backend"
+    | "sync-assignment-backend"
+    | "import-region"
+    | "import-assignment"
+    | "connect-survey"
+    | null
   >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -196,11 +206,11 @@ const SurveyDetailPage = () => {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
-  const [fasihAvailable, setFasihAvailable] = useState(false);
-  const [fasihStatusLoading, setFasihStatusLoading] = useState(true);
   const [regionPage, setRegionPage] = useState(1);
-
-  console.log("survey", survey);
+  const [backendFasihAvailable, setBackendFasihAvailable] = useState(false);
+  const [backendFasihLoading, setBackendFasihLoading] = useState(true);
+  const importRegionInputRef = useRef<HTMLInputElement | null>(null);
+  const importAssignmentInputRef = useRef<HTMLInputElement | null>(null);
 
   const isLevel1Locked = Boolean(survey?.region_level_1);
   const isLevel2Locked = Boolean(survey?.region_level_2);
@@ -251,6 +261,36 @@ const SurveyDetailPage = () => {
 
     return [{ value: surveyLevel2, label: surveyLevel2 }, ...kdkabOptions];
   }, [kdkabOptions, survey?.region_level_2]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadBackendFasihAccess = async () => {
+      setBackendFasihLoading(true);
+      try {
+        const features = await fetchSystemFeatures();
+        if (!active) {
+          return;
+        }
+        setBackendFasihAvailable(Boolean(features.fasih_available));
+      } catch {
+        if (!active) {
+          return;
+        }
+        setBackendFasihAvailable(false);
+      } finally {
+        if (active) {
+          setBackendFasihLoading(false);
+        }
+      }
+    };
+
+    void loadBackendFasihAccess();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const kdkecOptions = useMemo(
     () =>
@@ -415,7 +455,7 @@ const SurveyDetailPage = () => {
     [filteredRegions, regionPage],
   );
 
-  async function loadSurvey() {
+  const loadSurvey = useCallback(async () => {
     if (!surveyPeriodId) {
       return;
     }
@@ -454,50 +494,29 @@ const SurveyDetailPage = () => {
     } finally {
       setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    void loadSurvey();
   }, [surveyPeriodId]);
 
   useEffect(() => {
-    setRegionPage(1);
-  }, [regionCodeFilters]);
-
-  useEffect(() => {
-    let active = true;
-
-    const loadSystemFeatures = async () => {
-      setFasihStatusLoading(true);
-      try {
-        const result = await fetchSystemFeatures();
-        if (active) {
-          setFasihAvailable(result.fasih_available);
-        }
-      } catch {
-        if (active) {
-          setFasihAvailable(false);
-        }
-      } finally {
-        if (active) {
-          setFasihStatusLoading(false);
-        }
-      }
-    };
-
-    void loadSystemFeatures();
+    const timer = window.setTimeout(() => {
+      void loadSurvey();
+    }, 0);
 
     return () => {
-      active = false;
+      window.clearTimeout(timer);
     };
-  }, []);
+  }, [loadSurvey]);
 
-  async function handleSyncRegion() {
+  async function handleSyncRegionBackend() {
     if (!surveyPeriodId) {
       return;
     }
 
-    setActionLoading("sync-region");
+    if (!backendFasihAvailable) {
+      setActionError("Sync backend nonaktif: backend belum punya akses ke Fasih.");
+      return;
+    }
+
+    setActionLoading("sync-region-backend");
     setActionError(null);
     setActionSuccess(null);
 
@@ -506,19 +525,25 @@ const SurveyDetailPage = () => {
       setActionSuccess("Sync region berhasil dijalankan.");
       await loadSurvey();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Gagal sync region";
+      const message =
+        err instanceof Error ? err.message : "Gagal sync region";
       setActionError(message);
     } finally {
       setActionLoading(null);
     }
   }
 
-  async function handleSyncAssignment() {
+  async function handleSyncAssignmentBackend() {
     if (!surveyPeriodId) {
       return;
     }
 
-    setActionLoading("sync-assignment");
+    if (!backendFasihAvailable) {
+      setActionError("Sync backend nonaktif: backend belum punya akses ke Fasih.");
+      return;
+    }
+
+    setActionLoading("sync-assignment-backend");
     setActionError(null);
     setActionSuccess(null);
 
@@ -542,19 +567,98 @@ const SurveyDetailPage = () => {
 
     setIsAnalyzeLoading(true);
     setAnalyzeError(null);
+    setActionError(null);
+    setActionSuccess(null);
 
     try {
       const result = await analyzeSurveyAssignments(surveyPeriodId);
       setActionSuccess(
         `Analyze assignment selesai. ${result.analyzed_assignments}/${result.total_assignments} assignment dianalisis.`,
       );
-      setActionError(null);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Gagal analyze assignment";
       setAnalyzeError(message);
     } finally {
       setIsAnalyzeLoading(false);
+    }
+  }
+
+  function handleChooseImportRegionFile() {
+    importRegionInputRef.current?.click();
+  }
+
+  function handleChooseImportAssignmentFile() {
+    importAssignmentInputRef.current?.click();
+  }
+
+  async function handleImportRegionFile(file: File | null) {
+    if (!surveyPeriodId || !file) {
+      return;
+    }
+
+    setActionLoading("import-region");
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await importSurveyRegions(surveyPeriodId, file);
+      setActionSuccess("Import region berhasil dijalankan.");
+      await loadSurvey();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Gagal import region";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
+      if (importRegionInputRef.current) {
+        importRegionInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleImportAssignmentFile(file: File | null) {
+    if (!surveyPeriodId || !file) {
+      return;
+    }
+
+    setActionLoading("import-assignment");
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await importSurveyAssignments(surveyPeriodId, file);
+      setActionSuccess("Import assignment berhasil dijalankan.");
+      await loadSurvey();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal import assignment";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
+      if (importAssignmentInputRef.current) {
+        importAssignmentInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleConnectSurvey() {
+    if (!survey) {
+      return;
+    }
+
+    setActionLoading("connect-survey");
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      const message = await connectSurveyToExtension(survey);
+      setActionSuccess(message || "Survey berhasil dihubungkan ke extension.");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal menghubungkan survey ke extension";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
     }
   }
 
@@ -662,6 +766,7 @@ const SurveyDetailPage = () => {
   }
 
   function handleFilterChange(key: keyof RegionCodeFilters, value: string) {
+    setRegionPage(1);
     setRegionCodeFilters((current) => {
       if (key === "kdprov") {
         if (isLevel1Locked) {
@@ -754,37 +859,83 @@ const SurveyDetailPage = () => {
             <Badge variant="outline">
               Total Region: {filteredRegions.length}
             </Badge>
+            <input
+              ref={importRegionInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                void handleImportRegionFile(file);
+              }}
+            />
+            <input
+              ref={importAssignmentInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                void handleImportAssignmentFile(file);
+              }}
+            />
             <Button
               type="button"
               variant="outline"
-              onClick={() => void handleSyncRegion()}
+              onClick={() => void handleSyncRegionBackend()}
               disabled={
-                actionLoading === "sync-region" ||
-                fasihStatusLoading ||
-                !fasihAvailable
+                actionLoading === "sync-region-backend" ||
+                backendFasihLoading ||
+                !backendFasihAvailable
               }
             >
-              {actionLoading === "sync-region"
-                ? "Menyinkronkan..."
-                : fasihStatusLoading
-                  ? "Memeriksa akses..."
-                  : "Sync Region"}
+              {actionLoading === "sync-region-backend"
+                ? "Sync Region Backend..."
+                : "Sync Region"}
             </Button>
             <Button
               type="button"
               variant="outline"
-              onClick={() => void handleSyncAssignment()}
+              onClick={() => void handleSyncAssignmentBackend()}
               disabled={
-                actionLoading === "sync-assignment" ||
-                fasihStatusLoading ||
-                !fasihAvailable
+                actionLoading === "sync-assignment-backend" ||
+                backendFasihLoading ||
+                !backendFasihAvailable
               }
             >
-              {actionLoading === "sync-assignment"
-                ? "Menyinkronkan..."
-                : fasihStatusLoading
-                  ? "Memeriksa akses..."
-                  : "Sync Assignment"}
+              {actionLoading === "sync-assignment-backend"
+                ? "Sync Assignment Backend..."
+                : "Sync Assignment"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleChooseImportRegionFile}
+              disabled={actionLoading === "import-region"}
+            >
+              {actionLoading === "import-region"
+                ? "Import Region..."
+                : "Import Region"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleChooseImportAssignmentFile}
+              disabled={actionLoading === "import-assignment"}
+            >
+              {actionLoading === "import-assignment"
+                ? "Import Assignment..."
+                : "Import Assignment"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleConnectSurvey()}
+              disabled={actionLoading === "connect-survey" || !survey}
+            >
+              {actionLoading === "connect-survey"
+                ? "Menghubungkan Survey..."
+                : "Hubungkan Survey"}
             </Button>
             <Button
               type="button"
@@ -834,6 +985,13 @@ const SurveyDetailPage = () => {
         <Card className="border-emerald-200 bg-emerald-50">
           <CardContent className="py-3 text-xs text-emerald-700">
             {updateSuccess}
+          </CardContent>
+        </Card>
+      )}
+      {!backendFasihLoading && !backendFasihAvailable && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="py-3 text-xs text-amber-700">
+            Fitur sinkronisasi belum siap. Periksa konfigurasi lalu coba lagi.
           </CardContent>
         </Card>
       )}

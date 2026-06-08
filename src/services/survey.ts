@@ -44,6 +44,19 @@ export async function syncSurveyAssignments(
   });
 }
 
+export async function importSurveyAssignments(
+  surveyPeriodId: string,
+  file: File,
+): Promise<void> {
+  const formData = new FormData();
+  formData.set("file", file);
+
+  await requestJson<null>(`${API_BASE_URL}/surveys/${surveyPeriodId}/assignments/import`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
 export async function analyzeSurveyAssignments(
   surveyPeriodId: string,
 ): Promise<SurveyFraudAnalysisResult> {

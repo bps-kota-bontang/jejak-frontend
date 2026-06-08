@@ -48,6 +48,22 @@ export async function syncSurveyRegions(
   });
 }
 
+export async function importSurveyRegions(
+  surveyPeriodId: string,
+  file: File,
+): Promise<void> {
+  const formData = new FormData();
+  formData.set("file", file);
+
+  await requestJson<null>(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/import`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
 export async function fetchSurveyRegionLogs(
   surveyPeriodId: string,
   filter: SurveyRegionLogsFilter,
