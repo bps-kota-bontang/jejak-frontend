@@ -44,6 +44,19 @@ export async function syncSurveyAssignments(
   });
 }
 
+export async function syncSurveyAssignmentsByRegion(
+  surveyPeriodId: string,
+  regionFullCode: string,
+): Promise<void> {
+  await requestJson<null>(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/${encodeURIComponent(regionFullCode)}/assignments/sync`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+}
+
 export async function importSurveyAssignments(
   surveyPeriodId: string,
   file: File,
@@ -62,6 +75,19 @@ export async function analyzeSurveyAssignments(
 ): Promise<SurveyFraudAnalysisResult> {
   return requestJson<SurveyFraudAnalysisResult>(
     `${API_BASE_URL}/surveys/${surveyPeriodId}/analyze`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export async function analyzeSurveyAssignmentsByRegion(
+  surveyPeriodId: string,
+  regionFullCode: string,
+): Promise<SurveyFraudAnalysisResult> {
+  return requestJson<SurveyFraudAnalysisResult>(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/${encodeURIComponent(regionFullCode)}/analyze`,
     {
       method: "POST",
       body: JSON.stringify({}),

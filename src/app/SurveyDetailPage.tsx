@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
+  analyzeSurveyAssignmentsByRegion,
   analyzeSurveyAssignments,
   fetchSurveyByPeriodId,
   importSurveyAssignments,
   syncSurveyAssignments,
+  syncSurveyAssignmentsByRegion,
   updateSurvey,
 } from "@/services/survey";
 import { connectSurveyToExtension } from "@/services/extension";
@@ -58,6 +60,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useAuth } from "@/providers/AuthProvider";
 
 type RegionCodeFilters = {
   kdprov: string;
@@ -170,6 +173,8 @@ function buildOptions(
 
 const SurveyDetailPage = () => {
   const { surveyPeriodId = "" } = useParams();
+  const { hasAnyRole } = useAuth();
+  const isAdmin = hasAnyRole(["admin"]);
   const [survey, setSurvey] = useState<Survey | null>(null);
   const [regions, setRegions] = useState<SurveyRegion[]>([]);
   const [regionCodeFilters, setRegionCodeFilters] = useState<RegionCodeFilters>(
@@ -180,14 +185,19 @@ const SurveyDetailPage = () => {
   const [actionLoading, setActionLoading] = useState<
     | "sync-region-backend"
     | "sync-assignment-backend"
+    | "sync-assignment-region-backend"
     | "import-region"
     | "import-assignment"
     | "connect-survey"
     | null
   >(null);
+  const [syncingRegionFullCode, setSyncingRegionFullCode] = useState<
+    string | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [isAnalyzeLoading, setIsAnalyzeLoading] = useState(false);
+  const [analyzingRegionFullCode, setAnalyzingRegionFullCode] = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [updateForm, setUpdateForm] = useState<UpdateSurveyRequest>({
     name: "",
@@ -512,7 +522,9 @@ const SurveyDetailPage = () => {
     }
 
     if (!backendFasihAvailable) {
-      setActionError("Sync backend nonaktif: backend belum punya akses ke Fasih.");
+      setActionError(
+        "Sync backend nonaktif: backend belum punya akses ke Fasih.",
+      );
       return;
     }
 
@@ -525,8 +537,7 @@ const SurveyDetailPage = () => {
       setActionSuccess("Sync region berhasil dijalankan.");
       await loadSurvey();
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Gagal sync region";
+      const message = err instanceof Error ? err.message : "Gagal sync region";
       setActionError(message);
     } finally {
       setActionLoading(null);
@@ -539,7 +550,9 @@ const SurveyDetailPage = () => {
     }
 
     if (!backendFasihAvailable) {
-      setActionError("Sync backend nonaktif: backend belum punya akses ke Fasih.");
+      setActionError(
+        "Sync backend nonaktif: backend belum punya akses ke Fasih.",
+      );
       return;
     }
 
@@ -557,6 +570,39 @@ const SurveyDetailPage = () => {
       setActionError(message);
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  async function handleSyncAssignmentByRegionBackend(regionFullCode: string) {
+    if (!surveyPeriodId) {
+      return;
+    }
+
+    if (!backendFasihAvailable) {
+      setActionError(
+        "Sync backend nonaktif: backend belum punya akses ke Fasih.",
+      );
+      return;
+    }
+
+    setActionLoading("sync-assignment-region-backend");
+    setSyncingRegionFullCode(regionFullCode);
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await syncSurveyAssignmentsByRegion(surveyPeriodId, regionFullCode);
+      setActionSuccess(
+        `Sync assignment region ${regionFullCode} berhasil dijalankan.`,
+      );
+      await loadSurvey();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal sync assignment per region";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
+      setSyncingRegionFullCode(null);
     }
   }
 
@@ -584,6 +630,33 @@ const SurveyDetailPage = () => {
     }
   }
 
+  async function handleAnalyzeAssignmentsByRegion(regionFullCode: string) {
+    if (!surveyPeriodId) {
+      return;
+    }
+
+    setAnalyzingRegionFullCode(regionFullCode);
+    setAnalyzeError(null);
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      const result = await analyzeSurveyAssignmentsByRegion(
+        surveyPeriodId,
+        regionFullCode,
+      );
+      setActionSuccess(
+        `Analyze assignment region ${regionFullCode} selesai. ${result.analyzed_assignments}/${result.total_assignments} assignment dianalisis.`,
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal analyze assignment per region";
+      setAnalyzeError(message);
+    } finally {
+      setAnalyzingRegionFullCode(null);
+    }
+  }
+
   function handleChooseImportRegionFile() {
     importRegionInputRef.current?.click();
   }
@@ -606,7 +679,8 @@ const SurveyDetailPage = () => {
       setActionSuccess("Import region berhasil dijalankan.");
       await loadSurvey();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Gagal import region";
+      const message =
+        err instanceof Error ? err.message : "Gagal import region";
       setActionError(message);
     } finally {
       setActionLoading(null);
@@ -655,7 +729,9 @@ const SurveyDetailPage = () => {
       setActionSuccess(message || "Survey berhasil dihubungkan ke extension.");
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Gagal menghubungkan survey ke extension";
+        err instanceof Error
+          ? err.message
+          : "Gagal menghubungkan survey ke extension";
       setActionError(message);
     } finally {
       setActionLoading(null);
@@ -893,20 +969,22 @@ const SurveyDetailPage = () => {
                 ? "Sync Region Backend..."
                 : "Sync Region"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleSyncAssignmentBackend()}
-              disabled={
-                actionLoading === "sync-assignment-backend" ||
-                backendFasihLoading ||
-                !backendFasihAvailable
-              }
-            >
-              {actionLoading === "sync-assignment-backend"
-                ? "Sync Assignment Backend..."
-                : "Sync Assignment"}
-            </Button>
+            {isAdmin && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleSyncAssignmentBackend()}
+                disabled={
+                  actionLoading === "sync-assignment-backend" ||
+                  backendFasihLoading ||
+                  !backendFasihAvailable
+                }
+              >
+                {actionLoading === "sync-assignment-backend"
+                  ? "Sync Assignment Backend..."
+                  : "Sync Assignment"}
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
@@ -937,16 +1015,18 @@ const SurveyDetailPage = () => {
                 ? "Menghubungkan Survey..."
                 : "Hubungkan Survey"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleAnalyzeAssignments()}
-              disabled={isAnalyzeLoading}
-            >
-              {isAnalyzeLoading
-                ? "Analyze Assignment..."
-                : "Analyze Assignment"}
-            </Button>
+            {isAdmin && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleAnalyzeAssignments()}
+                disabled={isAnalyzeLoading}
+              >
+                {isAnalyzeLoading
+                  ? "Analyze Assignment..."
+                  : "Analyze Assignment"}
+              </Button>
+            )}
             <Button
               type="button"
               onClick={() => {
@@ -1322,13 +1402,48 @@ const SurveyDetailPage = () => {
                   <TableCell>{row.level_6 || "-"}</TableCell>
                   <TableCell>{row.assignment_count}</TableCell>
                   <TableCell>
-                    <Button asChild size="sm" variant="outline">
-                      <Link
-                        to={`/surveys/${surveyPeriodId}/regions/${row.full_code}`}
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild size="sm" variant="outline">
+                        <Link
+                          to={`/surveys/${surveyPeriodId}/regions/${row.full_code}`}
+                        >
+                          Detail
+                        </Link>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void handleSyncAssignmentByRegionBackend(
+                            row.full_code,
+                          )
+                        }
+                        disabled={
+                          actionLoading === "sync-assignment-region-backend" ||
+                          backendFasihLoading ||
+                          !backendFasihAvailable
+                        }
                       >
-                        Detail Region
-                      </Link>
-                    </Button>
+                        {actionLoading === "sync-assignment-region-backend" &&
+                        syncingRegionFullCode === row.full_code
+                          ? "Syncing..."
+                          : "Sync"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void handleAnalyzeAssignmentsByRegion(row.full_code)
+                        }
+                        disabled={analyzingRegionFullCode !== null}
+                      >
+                        {analyzingRegionFullCode === row.full_code
+                          ? "Analyzing..."
+                          : "Analyze"}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
