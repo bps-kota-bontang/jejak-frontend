@@ -1,0 +1,27 @@
+name: CI/CD Jejak Frontend
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+jobs:
+  build:
+    name: Build Jejak Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+      - name: Docker Auth
+        run: |
+          echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} --username ${{ github.actor }} --password-stdin
+      - name: Build and Push Docker Image
+        run: |
+          BUILD_HASH=$(git rev-parse --short HEAD)
+          docker build --no-cache \
+          --build-arg BUILD_HASH=$BUILD_HASH \
+          -t ${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_REGISTRY_USERNAME }}/jejak-frontend:latest \
+          .
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_REGISTRY_USERNAME }}/jejak-frontend:latest
