@@ -39,6 +39,7 @@ import { Label } from "@/components/ui/label";
 import {
   Pagination,
   PaginationContent,
+  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -455,6 +456,31 @@ const SurveyDetailPage = () => {
     1,
     Math.ceil(filteredRegions.length / REGION_PAGE_SIZE),
   );
+
+  const visibleRegionPaginationItems = useMemo<(number | "ellipsis")[]>(() => {
+    if (totalRegionPages <= 7) {
+      return Array.from({ length: totalRegionPages }, (_, index) => index + 1);
+    }
+
+    const items: (number | "ellipsis")[] = [1];
+    const start = Math.max(2, regionPage - 1);
+    const end = Math.min(totalRegionPages - 1, regionPage + 1);
+
+    if (start > 2) {
+      items.push("ellipsis");
+    }
+
+    for (let page = start; page <= end; page++) {
+      items.push(page);
+    }
+
+    if (end < totalRegionPages - 1) {
+      items.push("ellipsis");
+    }
+
+    items.push(totalRegionPages);
+    return items;
+  }, [regionPage, totalRegionPages]);
 
   const paginatedRegions = useMemo(
     () =>
@@ -1478,23 +1504,30 @@ const SurveyDetailPage = () => {
                   />
                 </PaginationItem>
 
-                {Array.from(
-                  { length: totalRegionPages },
-                  (_, index) => index + 1,
-                ).map((page) => (
-                  <PaginationItem key={page}>
-                    <PaginationLink
-                      href="#"
-                      isActive={page === regionPage}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        setRegionPage(page);
-                      }}
-                    >
-                      {page}
-                    </PaginationLink>
-                  </PaginationItem>
-                ))}
+                {visibleRegionPaginationItems.map((item, index) => {
+                  if (item === "ellipsis") {
+                    return (
+                      <PaginationItem key={`ellipsis-${index}`}>
+                        <PaginationEllipsis />
+                      </PaginationItem>
+                    );
+                  }
+
+                  return (
+                    <PaginationItem key={item}>
+                      <PaginationLink
+                        href="#"
+                        isActive={item === regionPage}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          setRegionPage(item);
+                        }}
+                      >
+                        {item}
+                      </PaginationLink>
+                    </PaginationItem>
+                  );
+                })}
 
                 <PaginationItem>
                   <PaginationNext

@@ -441,6 +441,7 @@ const SurveyRegionDetailPage = () => {
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 24,
         maxNativeZoom: 19,
+        crossOrigin: true,
       }).addTo(mapRef.current);
 
       markerLayerRef.current = L.layerGroup().addTo(mapRef.current);
