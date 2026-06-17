@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { createSurvey, fetchSurveys } from "@/services/survey";
+import { importSurveyCredentialsFromBrowser } from "@/services/extension";
 import type { CreateSurveyRequest, Survey } from "@/types/survey";
 import { useAreas } from "@/hooks/use-areas";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ const SurveyListPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -165,6 +167,44 @@ const SurveyListPage = () => {
       setSubmitError(message);
     } finally {
       setSubmitLoading(false);
+    }
+  }
+
+  async function handleImportCredentials() {
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    const surveyID = form.survey_id.trim();
+    const surveyPeriodID = form.survey_period_id.trim();
+    if (!surveyID || !surveyPeriodID) {
+      setSubmitError(
+        "Isi kode survey dan kode periode survey dulu sebelum import kredensial.",
+      );
+      return;
+    }
+
+    setImportLoading(true);
+    try {
+      const result = await importSurveyCredentialsFromBrowser({
+        survey_id: surveyID,
+        survey_period_id: surveyPeriodID,
+        survey_label: form.name.trim(),
+      });
+
+      setForm((current) => ({
+        ...current,
+        name: current.name || result.survey_label || current.name,
+        xsrf_token: result.xsrf_token,
+        cookie: result.cookie,
+      }));
+
+      setSubmitSuccess(result.message);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal import kredensial dari browser";
+      setSubmitError(message);
+    } finally {
+      setImportLoading(false);
     }
   }
 
@@ -314,6 +354,18 @@ const SurveyListPage = () => {
                 placeholder="Masukkan kode periode survey"
               />
             </Label>
+            <div className="md:col-span-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleImportCredentials()}
+                disabled={importLoading || submitLoading}
+              >
+                {importLoading
+                  ? "Import kredensial..."
+                  : "Import Kredensial Browser"}
+              </Button>
+            </div>
             <Label className="grid gap-1 md:col-span-2">
               <span>XSRF Token *</span>
               <Input

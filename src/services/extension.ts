@@ -6,11 +6,17 @@ const RESPONSE_SOURCE = "jejak-extension";
 const RESPONSE_TYPE = "JEJAK_FASIH_EXPORT_RESPONSE";
 const PING_TYPE = "JEJAK_FASIH_EXPORT_PING";
 const CONNECT_SURVEY_TYPE = "JEJAK_FASIH_CONNECT_SURVEY_REQUEST";
+const GET_SURVEY_CREDENTIAL_TYPE = "JEJAK_FASIH_GET_SURVEY_CREDENTIAL_REQUEST";
 
 type ExtensionResponsePayload = {
   success?: boolean;
   message?: string;
   request_id?: string;
+  survey_id?: string;
+  survey_period_id?: string;
+  survey_label?: string;
+  xsrf_token?: string;
+  cookie?: string;
 };
 
 function nextRequestId() {
@@ -76,6 +82,34 @@ async function sendBridgeMessage(
   return response.message || "Berhasil.";
 }
 
+async function sendBridgeMessageDetailed(
+  type: string,
+  payload: Record<string, string>,
+  timeoutMs = 5000,
+) {
+  const requestId = nextRequestId();
+  const responsePromise = waitForExtensionResponse(requestId, timeoutMs);
+
+  window.postMessage(
+    {
+      source: MESSAGE_SOURCE,
+      type,
+      payload: {
+        ...payload,
+        request_id: requestId,
+      },
+    },
+    "*",
+  );
+
+  const response = await responsePromise;
+  if (!response.success) {
+    throw new Error(response.message || "Proses ke extension gagal.");
+  }
+
+  return response;
+}
+
 export async function connectSurveyToExtension(survey: Survey) {
   await sendBridgeMessage(PING_TYPE, {}, 2500);
 
@@ -92,4 +126,68 @@ export async function connectSurveyToExtension(survey: Survey) {
     },
     6000,
   );
+}
+
+export type ImportedSurveyCredentials = {
+  message: string;
+  survey_label: string;
+  xsrf_token: string;
+  cookie: string;
+};
+
+export async function importSurveyCredentialsFromBrowser(input: {
+  survey_id: string;
+  survey_period_id: string;
+  survey_label?: string;
+}) {
+  await sendBridgeMessage(PING_TYPE, {}, 2500);
+
+  const surveyID = input.survey_id.trim();
+  const surveyPeriodID = input.survey_period_id.trim();
+  if (!surveyID || !surveyPeriodID) {
+    throw new Error("Kode survey dan kode periode survey wajib diisi.");
+  }
+
+  const response = await sendBridgeMessageDetailed(
+    CONNECT_SURVEY_TYPE,
+    {
+      survey_label: (input.survey_label || "").trim(),
+      survey_id: surveyID,
+      survey_period_id: surveyPeriodID,
+      page_url: `https://fasih-sm.bps.go.id/app/surveys/${encodeURIComponent(surveyID)}/${encodeURIComponent(surveyPeriodID)}`,
+    },
+    6000,
+  );
+
+  let xsrfToken = (response.xsrf_token || "").trim();
+  let cookie = (response.cookie || "").trim();
+  let surveyLabel = (response.survey_label || "").trim();
+
+  if (!xsrfToken || !cookie) {
+    const stored = await sendBridgeMessageDetailed(
+      GET_SURVEY_CREDENTIAL_TYPE,
+      {
+        survey_id: surveyID,
+        survey_period_id: surveyPeriodID,
+      },
+      5000,
+    );
+
+    xsrfToken = (stored.xsrf_token || "").trim();
+    cookie = (stored.cookie || "").trim();
+    surveyLabel = surveyLabel || (stored.survey_label || "").trim();
+  }
+
+  if (!xsrfToken || !cookie) {
+    throw new Error(
+      "Import berhasil dipicu tetapi cookie/XSRF belum tersimpan. Buka tab survey Fasih lalu klik Hubungkan ke Jejak sekali lagi.",
+    );
+  }
+
+  return {
+    message: response.message || "Cookie dan XSRF berhasil diimport dari browser.",
+    survey_label: surveyLabel,
+    xsrf_token: xsrfToken,
+    cookie,
+  } as ImportedSurveyCredentials;
 }

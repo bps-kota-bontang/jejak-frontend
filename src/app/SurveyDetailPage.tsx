@@ -9,7 +9,10 @@ import {
   syncSurveyAssignmentsByRegion,
   updateSurvey,
 } from "@/services/survey";
-import { connectSurveyToExtension } from "@/services/extension";
+import {
+  connectSurveyToExtension,
+  importSurveyCredentialsFromBrowser,
+} from "@/services/extension";
 import {
   fetchSurveyRegionsPage,
   importSurveyRegions,
@@ -223,6 +226,7 @@ const SurveyDetailPage = () => {
     log_date_to: "",
   });
   const [updateLoading, setUpdateLoading] = useState(false);
+  const [importCredentialLoading, setImportCredentialLoading] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
@@ -975,6 +979,43 @@ const SurveyDetailPage = () => {
     }
   }
 
+  async function handleImportCredentialsToUpdateForm() {
+    if (!survey || !surveyPeriodId) {
+      setUpdateError("Data survey tidak ditemukan.");
+      return;
+    }
+
+    setUpdateError(null);
+    setUpdateSuccess(null);
+    setImportCredentialLoading(true);
+
+    try {
+      const result = await importSurveyCredentialsFromBrowser({
+        survey_id: survey.survey_id,
+        survey_period_id: surveyPeriodId,
+        survey_label: survey.name,
+      });
+
+      console.log("[handleImportCredentialsToUpdateForm] Imported credentials:", result);
+
+      setUpdateForm((current) => ({
+        ...current,
+        xsrf_token: result.xsrf_token,
+        cookie: result.cookie,
+      }));
+
+      setUpdateSuccess(result.message);
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Gagal import kredensial dari browser";
+      setUpdateError(message);
+    } finally {
+      setImportCredentialLoading(false);
+    }
+  }
+
   function handleFilterChange(key: keyof RegionCodeFilters, value: string) {
     setRegionPage(1);
     setRegionCodeFilters((current) => {
@@ -1111,7 +1152,7 @@ const SurveyDetailPage = () => {
               }
             >
               {actionLoading === "sync-region-backend"
-                ? "Sync Region Backend..."
+                ? "Sync Region..."
                 : "Sync Region"}
             </Button>
             {isAdmin && (
@@ -1126,7 +1167,7 @@ const SurveyDetailPage = () => {
                 }
               >
                 {actionLoading === "sync-assignment-backend"
-                  ? "Sync Assignment Backend..."
+                  ? "Sync Assignment..."
                   : "Sync Assignment"}
               </Button>
             )}
@@ -1255,6 +1296,18 @@ const SurveyDetailPage = () => {
                   placeholder="Nama survey"
                 />
               </Label>
+              <div className="md:col-span-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleImportCredentialsToUpdateForm()}
+                  disabled={importCredentialLoading || updateLoading}
+                >
+                  {importCredentialLoading
+                    ? "Import kredensial..."
+                    : "Import Kredensial Browser"}
+                </Button>
+              </div>
               <Label className="grid gap-1 md:col-span-2">
                 <span>XSRF Token</span>
                 <Input
