@@ -12,9 +12,10 @@ import {
 import { connectSurveyToExtension } from "@/services/extension";
 import {
   fetchSurveyRegionsPage,
-  fetchSurveyRegions,
   importSurveyRegions,
   syncSurveyRegions,
+  fetchSurveyRegionFilterOptions,
+  type RegionFilterOptionsResponse,
 } from "@/services/region";
 import { fetchSystemFeatures } from "@/services/system";
 import type { Survey, UpdateSurveyRequest } from "@/types/survey";
@@ -98,7 +99,11 @@ function parseRegionPageSizeParam(rawValue: string | null): number {
     return REGION_PAGE_SIZE_OPTIONS[0];
   }
 
-  if (REGION_PAGE_SIZE_OPTIONS.includes(value as (typeof REGION_PAGE_SIZE_OPTIONS)[number])) {
+  if (
+    REGION_PAGE_SIZE_OPTIONS.includes(
+      value as (typeof REGION_PAGE_SIZE_OPTIONS)[number],
+    )
+  ) {
     return value;
   }
 
@@ -115,7 +120,9 @@ function parseAssignmentAvailabilityFilter(
   return "all";
 }
 
-function normalizeRegionCodeFilters(filters: RegionCodeFilters): RegionCodeFilters {
+function normalizeRegionCodeFilters(
+  filters: RegionCodeFilters,
+): RegionCodeFilters {
   const normalized: RegionCodeFilters = {
     kdprov: filters.kdprov.trim(),
     kdkab: filters.kdkab.trim(),
@@ -171,88 +178,12 @@ function buildInitialRegionFilters(survey: Survey | null): RegionCodeFilters {
   };
 }
 
-type OptionItem = {
-  value: string;
-  label: string;
-};
-
-function getCodeByFilterKey(
-  row: SurveyRegion,
-  key: keyof RegionCodeFilters,
-): string {
-  if (key === "kdprov") {
-    return row.level_1 || "";
-  }
-  if (key === "kdkab") {
-    return row.level_2 || "";
-  }
-  if (key === "kdkec") {
-    return row.level_3 || "";
-  }
-  if (key === "kddesa") {
-    return row.level_4 || "";
-  }
-  if (key === "kdsls") {
-    return row.level_5 || "";
-  }
-
-  return row.level_6 || "";
-}
-
-function getLabelByFilterKey(
-  row: SurveyRegion,
-  key: keyof RegionCodeFilters,
-): string {
-  if (key === "kdprov") {
-    return row.level_1_label || row.level_1 || "";
-  }
-  if (key === "kdkab") {
-    return row.level_2_label || row.level_2 || "";
-  }
-  if (key === "kdkec") {
-    return row.level_3_label || row.level_3 || "";
-  }
-  if (key === "kddesa") {
-    return row.level_4_label || row.level_4 || "";
-  }
-  if (key === "kdsls") {
-    return row.level_5_label || row.level_5 || "";
-  }
-
-  return row.level_6 || "";
-}
-
-function buildOptions(
-  rows: SurveyRegion[],
-  key: keyof RegionCodeFilters,
-): OptionItem[] {
-  const map = new Map<string, string>();
-
-  for (const row of rows) {
-    const value = getCodeByFilterKey(row, key);
-    const label = getLabelByFilterKey(row, key);
-
-    if (!value) {
-      continue;
-    }
-
-    if (!map.has(value)) {
-      map.set(value, label);
-    }
-  }
-
-  return Array.from(map.entries())
-    .map(([value, label]) => ({ value, label }))
-    .sort((a, b) => a.value.localeCompare(b.value));
-}
-
 const SurveyDetailPage = () => {
   const { surveyPeriodId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasAnyRole } = useAuth();
   const isAdmin = hasAnyRole(["admin"]);
   const [survey, setSurvey] = useState<Survey | null>(null);
-  const [regions, setRegions] = useState<SurveyRegion[]>([]);
   const [regionRows, setRegionRows] = useState<SurveyRegion[]>([]);
   const [regionCodeFilters, setRegionCodeFilters] = useState<RegionCodeFilters>(
     () => buildRegionFiltersFromSearchParams(searchParams),
@@ -274,7 +205,9 @@ const SurveyDetailPage = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [isAnalyzeLoading, setIsAnalyzeLoading] = useState(false);
-  const [analyzingRegionFullCode, setAnalyzingRegionFullCode] = useState<string | null>(null);
+  const [analyzingRegionFullCode, setAnalyzingRegionFullCode] = useState<
+    string | null
+  >(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [updateForm, setUpdateForm] = useState<UpdateSurveyRequest>({
     name: "",
@@ -307,6 +240,8 @@ const SurveyDetailPage = () => {
     );
   const [backendFasihAvailable, setBackendFasihAvailable] = useState(false);
   const [backendFasihLoading, setBackendFasihLoading] = useState(true);
+  const [regionFilterOptions, setRegionFilterOptions] =
+    useState<RegionFilterOptionsResponse | null>(null);
   const importRegionInputRef = useRef<HTMLInputElement | null>(null);
   const importAssignmentInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -317,10 +252,10 @@ const SurveyDetailPage = () => {
   const effectiveLevel2Filter =
     survey?.region_level_2 || regionCodeFilters.kdkab;
 
-  const kdprovOptions = useMemo(
-    () => buildOptions(regions, "kdprov"),
-    [regions],
-  );
+  const kdprovOptions = useMemo(() => {
+    // Use API filter options for level 1
+    return regionFilterOptions?.level_1 || [];
+  }, [regionFilterOptions?.level_1]);
 
   const kdprovOptionsWithSurvey = useMemo(() => {
     const surveyLevel1 = survey?.region_level_1?.trim() || "";
@@ -335,17 +270,10 @@ const SurveyDetailPage = () => {
     return [{ value: surveyLevel1, label: surveyLevel1 }, ...kdprovOptions];
   }, [kdprovOptions, survey?.region_level_1]);
 
-  const kdkabOptions = useMemo(
-    () =>
-      buildOptions(
-        regions.filter(
-          (row) =>
-            !effectiveLevel1Filter || row.level_1 === effectiveLevel1Filter,
-        ),
-        "kdkab",
-      ),
-    [effectiveLevel1Filter, regions],
-  );
+  const kdkabOptions = useMemo(() => {
+    // Use API filter options for level 2
+    return regionFilterOptions?.level_2 || [];
+  }, [regionFilterOptions?.level_2]);
 
   const kdkabOptionsWithSurvey = useMemo(() => {
     const surveyLevel2 = survey?.region_level_2?.trim() || "";
@@ -391,119 +319,23 @@ const SurveyDetailPage = () => {
   }, []);
 
   const kdkecOptions = useMemo(
-    () =>
-      buildOptions(
-        regions
-          .filter(
-            (row) =>
-              !effectiveLevel1Filter || row.level_1 === effectiveLevel1Filter,
-          )
-          .filter(
-            (row) =>
-              !effectiveLevel2Filter || row.level_2 === effectiveLevel2Filter,
-          ),
-        "kdkec",
-      ),
-    [effectiveLevel1Filter, effectiveLevel2Filter, regions],
+    () => regionFilterOptions?.level_3 || [],
+    [regionFilterOptions?.level_3],
   );
 
   const kddesaOptions = useMemo(
-    () =>
-      buildOptions(
-        regions
-          .filter(
-            (row) =>
-              !effectiveLevel1Filter || row.level_1 === effectiveLevel1Filter,
-          )
-          .filter(
-            (row) =>
-              !effectiveLevel2Filter || row.level_2 === effectiveLevel2Filter,
-          )
-          .filter(
-            (row) =>
-              !regionCodeFilters.kdkec ||
-              row.level_3 === regionCodeFilters.kdkec,
-          ),
-        "kddesa",
-      ),
-    [
-      effectiveLevel1Filter,
-      effectiveLevel2Filter,
-      regionCodeFilters.kdkec,
-      regions,
-    ],
+    () => regionFilterOptions?.level_4 || [],
+    [regionFilterOptions?.level_4],
   );
 
   const kdslsOptions = useMemo(
-    () =>
-      buildOptions(
-        regions
-          .filter(
-            (row) =>
-              !effectiveLevel1Filter || row.level_1 === effectiveLevel1Filter,
-          )
-          .filter(
-            (row) =>
-              !effectiveLevel2Filter || row.level_2 === effectiveLevel2Filter,
-          )
-          .filter(
-            (row) =>
-              !regionCodeFilters.kdkec ||
-              row.level_3 === regionCodeFilters.kdkec,
-          )
-          .filter(
-            (row) =>
-              !regionCodeFilters.kddesa ||
-              row.level_4 === regionCodeFilters.kddesa,
-          ),
-        "kdsls",
-      ),
-    [
-      effectiveLevel1Filter,
-      effectiveLevel2Filter,
-      regionCodeFilters.kdkec,
-      regionCodeFilters.kddesa,
-      regions,
-    ],
+    () => regionFilterOptions?.level_5 || [],
+    [regionFilterOptions?.level_5],
   );
 
   const kdsubslsOptions = useMemo(
-    () =>
-      buildOptions(
-        regions
-          .filter(
-            (row) =>
-              !effectiveLevel1Filter || row.level_1 === effectiveLevel1Filter,
-          )
-          .filter(
-            (row) =>
-              !effectiveLevel2Filter || row.level_2 === effectiveLevel2Filter,
-          )
-          .filter(
-            (row) =>
-              !regionCodeFilters.kdkec ||
-              row.level_3 === regionCodeFilters.kdkec,
-          )
-          .filter(
-            (row) =>
-              !regionCodeFilters.kddesa ||
-              row.level_4 === regionCodeFilters.kddesa,
-          )
-          .filter(
-            (row) =>
-              !regionCodeFilters.kdsls ||
-              row.level_5 === regionCodeFilters.kdsls,
-          ),
-        "kdsubsls",
-      ),
-    [
-      effectiveLevel1Filter,
-      effectiveLevel2Filter,
-      regionCodeFilters.kdkec,
-      regionCodeFilters.kddesa,
-      regionCodeFilters.kdsls,
-      regions,
-    ],
+    () => regionFilterOptions?.level_6 || [],
+    [regionFilterOptions?.level_6],
   );
 
   const currentRegionPage = Math.max(1, regionPage);
@@ -544,27 +376,28 @@ const SurveyDetailPage = () => {
     setError(null);
 
     try {
+      console.log("[loadSurvey] Starting with surveyPeriodId:", surveyPeriodId);
+
       const surveyResult = await fetchSurveyByPeriodId(surveyPeriodId);
-      const regionResult = await fetchSurveyRegions(surveyPeriodId, {
-        region_level_1: surveyResult.region_level_1,
-        region_level_2: surveyResult.region_level_2,
-      });
+      console.log("[loadSurvey] Survey loaded:", surveyResult);
+
+      // Note: Filter options are loaded by the cascading filter useEffect below
+      // that watches region filter changes
 
       setSurvey(surveyResult);
-      setRegions(regionResult);
-      const regionFiltersFromQuery = buildRegionFiltersFromSearchParams(searchParams);
+
+      // Initialize region and assignment filters and pagination from URL on first load
+      // This will be read from searchParams by the initialization effect
       const normalizedFilters = normalizeRegionCodeFilters({
-        ...regionFiltersFromQuery,
-        kdprov: surveyResult.region_level_1 || regionFiltersFromQuery.kdprov,
-        kdkab: surveyResult.region_level_2 || regionFiltersFromQuery.kdkab,
+        kdprov: surveyResult.region_level_1 || "",
+        kdkab: surveyResult.region_level_2 || "",
+        kdkec: "",
+        kddesa: "",
+        kdsls: "",
+        kdsubsls: "",
       });
 
       setRegionCodeFilters(normalizedFilters);
-      setRegionPage(parseRegionPageParam(searchParams.get("page")));
-      setRegionPageSize(parseRegionPageSizeParam(searchParams.get("pageSize")));
-      setAssignmentAvailabilityFilter(
-        parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
-      );
       setUpdateForm({
         name: surveyResult.name,
         survey_id: surveyResult.survey_id,
@@ -581,11 +414,12 @@ const SurveyDetailPage = () => {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Gagal memuat detail survey";
+      console.error("[loadSurvey] Error:", message);
       setError(message);
     } finally {
       setLoading(false);
     }
-  }, [searchParams, surveyPeriodId]);
+  }, [surveyPeriodId]);
 
   useEffect(() => {
     if (!surveyPeriodId) {
@@ -609,11 +443,10 @@ const SurveyDetailPage = () => {
               : assignmentAvailabilityFilter,
         };
 
-        const result = await fetchSurveyRegionsPage(
-          surveyPeriodId,
-          filter,
-          { page: currentRegionPage, per_page: regionPageSize },
-        );
+        const result = await fetchSurveyRegionsPage(surveyPeriodId, filter, {
+          page: currentRegionPage,
+          per_page: regionPageSize,
+        });
 
         if (!active) {
           return;
@@ -726,6 +559,94 @@ const SurveyDetailPage = () => {
       window.clearTimeout(timer);
     };
   }, [loadSurvey]);
+
+  // Initialize region filters, pagination, and assignment filter from URL on first load
+  // This is separate from loadSurvey to avoid refetching survey detail when URL changes
+  useEffect(() => {
+    if (!survey) {
+      return;
+    }
+
+    const regionFiltersFromQuery =
+      buildRegionFiltersFromSearchParams(searchParams);
+    const normalizedFilters = normalizeRegionCodeFilters({
+      ...regionFiltersFromQuery,
+      kdprov: survey.region_level_1 || regionFiltersFromQuery.kdprov,
+      kdkab: survey.region_level_2 || regionFiltersFromQuery.kdkab,
+    });
+
+    setRegionCodeFilters(normalizedFilters);
+    setRegionPage(parseRegionPageParam(searchParams.get("page")));
+    setRegionPageSize(parseRegionPageSizeParam(searchParams.get("pageSize")));
+    setAssignmentAvailabilityFilter(
+      parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
+    );
+  }, [survey]); // Only run once after survey is loaded
+
+  // Refetch filter options when region filters change for cascading effect
+  useEffect(() => {
+    // Only fetch after survey is loaded to avoid duplicate requests
+    if (!surveyPeriodId || !survey) {
+      return;
+    }
+
+    let active = true;
+
+    const loadFilterOptions = async () => {
+      try {
+        console.log(
+          "[loadFilterOptions] Loading with filters:",
+          effectiveLevel1Filter,
+          effectiveLevel2Filter,
+          regionCodeFilters.kdkec,
+          regionCodeFilters.kddesa,
+          regionCodeFilters.kdsls,
+        );
+
+        const filterParams = {
+          level1: effectiveLevel1Filter || undefined,
+          level2: effectiveLevel2Filter || undefined,
+          level3: regionCodeFilters.kdkec || undefined,
+          level4: regionCodeFilters.kddesa || undefined,
+          level5: regionCodeFilters.kdsls || undefined,
+        };
+
+        const filterOptions = await fetchSurveyRegionFilterOptions(
+          surveyPeriodId,
+          filterParams as any,
+        );
+
+        if (!active) {
+          return;
+        }
+
+        console.log(
+          "[loadFilterOptions] Filter options refreshed:",
+          filterOptions,
+        );
+        setRegionFilterOptions(filterOptions);
+      } catch (err) {
+        if (!active) {
+          return;
+        }
+        console.error("[loadFilterOptions] Failed to load filter options:", err);
+      }
+    };
+
+    void loadFilterOptions();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    surveyPeriodId,
+    survey,
+    effectiveLevel1Filter,
+    effectiveLevel2Filter,
+    regionCodeFilters.kdkec,
+    regionCodeFilters.kddesa,
+    regionCodeFilters.kdsls,
+  ]);
 
   async function handleSyncRegionBackend() {
     if (!surveyPeriodId) {
@@ -861,7 +782,9 @@ const SurveyDetailPage = () => {
       );
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Gagal analyze assignment per region";
+        err instanceof Error
+          ? err.message
+          : "Gagal analyze assignment per region";
       setAnalyzeError(message);
     } finally {
       setAnalyzingRegionFullCode(null);
@@ -1156,9 +1079,7 @@ const SurveyDetailPage = () => {
             Detail survey aktif dan wilayah.
           </CardDescription>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">
-              Total Region: {regionTotal}
-            </Badge>
+            <Badge variant="outline">Total Region: {regionTotal}</Badge>
             <input
               ref={importRegionInputRef}
               type="file"
@@ -1468,7 +1389,7 @@ const SurveyDetailPage = () => {
                 }
                 disabled={
                   isLevel2Locked ||
-                  (!effectiveLevel1Filter && kdprovOptions.length > 0)
+                  !effectiveLevel1Filter
                 }
               >
                 <SelectTrigger className="w-full">
@@ -1497,7 +1418,7 @@ const SurveyDetailPage = () => {
                     value === ALL_FILTER_VALUE ? "" : value,
                   )
                 }
-                disabled={!regionCodeFilters.kdkab && kdkabOptions.length > 0}
+                disabled={!effectiveLevel2Filter}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Semua" />
@@ -1523,7 +1444,7 @@ const SurveyDetailPage = () => {
                     value === ALL_FILTER_VALUE ? "" : value,
                   )
                 }
-                disabled={!regionCodeFilters.kdkec && kdkecOptions.length > 0}
+                disabled={!regionCodeFilters.kdkec}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Semua" />
@@ -1549,7 +1470,7 @@ const SurveyDetailPage = () => {
                     value === ALL_FILTER_VALUE ? "" : value,
                   )
                 }
-                disabled={!regionCodeFilters.kddesa && kddesaOptions.length > 0}
+                disabled={!regionCodeFilters.kddesa}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Semua" />
@@ -1575,7 +1496,7 @@ const SurveyDetailPage = () => {
                     value === ALL_FILTER_VALUE ? "" : value,
                   )
                 }
-                disabled={!regionCodeFilters.kdsls && kdslsOptions.length > 0}
+                disabled={!regionCodeFilters.kdsls}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Semua" />
@@ -1584,13 +1505,12 @@ const SurveyDetailPage = () => {
                   <SelectItem value={ALL_FILTER_VALUE}>Semua</SelectItem>
                   {kdsubslsOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                      {option.value} - {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Label>
-
           </div>
 
           <Table>
@@ -1636,7 +1556,9 @@ const SurveyDetailPage = () => {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">Semua</SelectItem>
-                              <SelectItem value="has">Ada Assignment</SelectItem>
+                              <SelectItem value="has">
+                                Ada Assignment
+                              </SelectItem>
                               <SelectItem value="none">
                                 Tidak Ada Assignment
                               </SelectItem>
@@ -1725,16 +1647,14 @@ const SurveyDetailPage = () => {
               {regionTotal === 0
                 ? 0
                 : (currentRegionPage - 1) * regionPageSize + 1}
-              -
-              {Math.min(
-                currentRegionPage * regionPageSize,
-                regionTotal,
-              )}{" "}
-              dari {regionTotal} data.
+              -{Math.min(currentRegionPage * regionPageSize, regionTotal)} dari{" "}
+              {regionTotal} data.
             </p>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Per halaman</span>
+                <span className="text-xs text-muted-foreground">
+                  Per halaman
+                </span>
                 <Select
                   value={String(regionPageSize)}
                   onValueChange={handleRegionPageSizeChange}
@@ -1752,68 +1672,68 @@ const SurveyDetailPage = () => {
                 </Select>
               </div>
               <Pagination className="mx-0 w-auto justify-start md:justify-end">
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    href="#"
-                    text="Sebelumnya"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setRegionPage((current) => Math.max(1, current - 1));
-                    }}
-                    aria-disabled={currentRegionPage === 1}
-                    className={
-                      currentRegionPage === 1
-                        ? "pointer-events-none opacity-50"
-                        : undefined
-                    }
-                  />
-                </PaginationItem>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      text="Sebelumnya"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setRegionPage((current) => Math.max(1, current - 1));
+                      }}
+                      aria-disabled={currentRegionPage === 1}
+                      className={
+                        currentRegionPage === 1
+                          ? "pointer-events-none opacity-50"
+                          : undefined
+                      }
+                    />
+                  </PaginationItem>
 
-                {visibleRegionPaginationItems.map((item, index) => {
-                  if (item === "ellipsis") {
+                  {visibleRegionPaginationItems.map((item, index) => {
+                    if (item === "ellipsis") {
+                      return (
+                        <PaginationItem key={`ellipsis-${index}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      );
+                    }
+
                     return (
-                      <PaginationItem key={`ellipsis-${index}`}>
-                        <PaginationEllipsis />
+                      <PaginationItem key={item}>
+                        <PaginationLink
+                          href="#"
+                          isActive={item === currentRegionPage}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            setRegionPage(item);
+                          }}
+                        >
+                          {item}
+                        </PaginationLink>
                       </PaginationItem>
                     );
-                  }
+                  })}
 
-                  return (
-                    <PaginationItem key={item}>
-                      <PaginationLink
-                        href="#"
-                        isActive={item === currentRegionPage}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          setRegionPage(item);
-                        }}
-                      >
-                        {item}
-                      </PaginationLink>
-                    </PaginationItem>
-                  );
-                })}
-
-                <PaginationItem>
-                  <PaginationNext
-                    href="#"
-                    text="Berikutnya"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setRegionPage((current) =>
-                        Math.min(regionTotalPages, current + 1),
-                      );
-                    }}
-                    aria-disabled={currentRegionPage === regionTotalPages}
-                    className={
-                      currentRegionPage === regionTotalPages
-                        ? "pointer-events-none opacity-50"
-                        : undefined
-                    }
-                  />
-                </PaginationItem>
-              </PaginationContent>
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      text="Berikutnya"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        setRegionPage((current) =>
+                          Math.min(regionTotalPages, current + 1),
+                        );
+                      }}
+                      aria-disabled={currentRegionPage === regionTotalPages}
+                      className={
+                        currentRegionPage === regionTotalPages
+                          ? "pointer-events-none opacity-50"
+                          : undefined
+                      }
+                    />
+                  </PaginationItem>
+                </PaginationContent>
               </Pagination>
             </div>
           </div>

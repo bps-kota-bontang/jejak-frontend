@@ -97,6 +97,64 @@ export async function fetchSurveyRegionsPage(
   };
 }
 
+export type RegionFilterRequest = {
+  level1?: string;
+  level2?: string;
+  level3?: string;
+  level4?: string;
+  level5?: string;
+};
+
+export type RegionFilterOption = {
+  value: string;
+  label: string;
+};
+
+export type RegionFilterOptionsResponse = {
+  level_1: RegionFilterOption[];
+  level_2: RegionFilterOption[];
+  level_3: RegionFilterOption[];
+  level_4: RegionFilterOption[];
+  level_5: RegionFilterOption[];
+  level_6: RegionFilterOption[];
+};
+
+export async function fetchSurveyRegionFilterOptions(
+  surveyPeriodId: string,
+  filters?: RegionFilterRequest,
+): Promise<RegionFilterOptionsResponse> {
+  const params = new URLSearchParams();
+  if (filters?.level1) params.append("level1", filters.level1);
+  if (filters?.level2) params.append("level2", filters.level2);
+  if (filters?.level3) params.append("level3", filters.level3);
+  if (filters?.level4) params.append("level4", filters.level4);
+  if (filters?.level5) params.append("level5", filters.level5);
+
+  const queryString = params.toString();
+  const url =
+    queryString.length > 0
+      ? `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/filter-options?${queryString}`
+      : `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/filter-options`;
+
+  const response = await requestWithAuth(url);
+  const payload = (await response.json()) as ApiEnvelope<RegionFilterOptionsResponse>;
+
+  if (!response.ok) {
+    const message = payload.message || "Request failed";
+    const details = payload.errors?.join(", ") || "";
+    throw new Error(details ? `${message}: ${details}` : message);
+  }
+
+  return payload.data || {
+    level_1: [],
+    level_2: [],
+    level_3: [],
+    level_4: [],
+    level_5: [],
+    level_6: [],
+  };
+}
+
 export async function syncSurveyRegions(surveyPeriodId: string): Promise<void> {
   await requestJson<null>(
     `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/sync`,
