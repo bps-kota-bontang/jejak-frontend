@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import {
   analyzeSurveyAssignmentsByRegion,
   analyzeSurveyAssignments,
@@ -11,6 +11,7 @@ import {
 } from "@/services/survey";
 import { connectSurveyToExtension } from "@/services/extension";
 import {
+  fetchSurveyRegionsPage,
   fetchSurveyRegions,
   importSurveyRegions,
   syncSurveyRegions,
@@ -54,6 +55,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Table,
   TableBody,
   TableCell,
@@ -62,6 +68,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/providers/AuthProvider";
+import { Filter } from "lucide-react";
 
 type RegionCodeFilters = {
   kdprov: string;
@@ -72,17 +79,84 @@ type RegionCodeFilters = {
   kdsubsls: string;
 };
 
-const defaultRegionCodeFilters: RegionCodeFilters = {
-  kdprov: "",
-  kdkab: "",
-  kdkec: "",
-  kddesa: "",
-  kdsls: "",
-  kdsubsls: "",
-};
-
 const ALL_FILTER_VALUE = "__all__";
-const REGION_PAGE_SIZE = 10;
+const REGION_PAGE_SIZE_OPTIONS = [10, 50, 100, 1000] as const;
+type AssignmentAvailabilityFilter = "all" | "has" | "none";
+
+function parseRegionPageParam(rawValue: string | null): number {
+  const value = Number(rawValue || "1");
+  if (!Number.isInteger(value) || value < 1) {
+    return 1;
+  }
+
+  return value;
+}
+
+function parseRegionPageSizeParam(rawValue: string | null): number {
+  const value = Number(rawValue || String(REGION_PAGE_SIZE_OPTIONS[0]));
+  if (!Number.isInteger(value)) {
+    return REGION_PAGE_SIZE_OPTIONS[0];
+  }
+
+  if (REGION_PAGE_SIZE_OPTIONS.includes(value as (typeof REGION_PAGE_SIZE_OPTIONS)[number])) {
+    return value;
+  }
+
+  return REGION_PAGE_SIZE_OPTIONS[0];
+}
+
+function parseAssignmentAvailabilityFilter(
+  rawValue: string | null,
+): AssignmentAvailabilityFilter {
+  if (rawValue === "has" || rawValue === "none") {
+    return rawValue;
+  }
+
+  return "all";
+}
+
+function normalizeRegionCodeFilters(filters: RegionCodeFilters): RegionCodeFilters {
+  const normalized: RegionCodeFilters = {
+    kdprov: filters.kdprov.trim(),
+    kdkab: filters.kdkab.trim(),
+    kdkec: filters.kdkec.trim(),
+    kddesa: filters.kddesa.trim(),
+    kdsls: filters.kdsls.trim(),
+    kdsubsls: filters.kdsubsls.trim(),
+  };
+
+  if (!normalized.kdprov) {
+    normalized.kdkab = "";
+  }
+  if (!normalized.kdkab) {
+    normalized.kdkec = "";
+  }
+  if (!normalized.kdkec) {
+    normalized.kddesa = "";
+  }
+  if (!normalized.kddesa) {
+    normalized.kdsls = "";
+  }
+  if (!normalized.kdsls) {
+    normalized.kdsubsls = "";
+  }
+
+  return normalized;
+}
+
+function buildRegionFiltersFromSearchParams(
+  searchParams: URLSearchParams,
+): RegionCodeFilters {
+  return normalizeRegionCodeFilters({
+    kdprov: searchParams.get("kdprov") || "",
+    kdkab: searchParams.get("kdkab") || "",
+    kdkec: searchParams.get("kdkec") || "",
+    kddesa: searchParams.get("kddesa") || "",
+    kdsls: searchParams.get("kdsls") || "",
+    kdsubsls: searchParams.get("kdsubsls") || "",
+  });
+}
+
 function buildInitialRegionFilters(survey: Survey | null): RegionCodeFilters {
   const kdprov = survey?.region_level_1 || "";
   const kdkab = survey?.region_level_2 || "";
@@ -174,12 +248,14 @@ function buildOptions(
 
 const SurveyDetailPage = () => {
   const { surveyPeriodId = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasAnyRole } = useAuth();
   const isAdmin = hasAnyRole(["admin"]);
   const [survey, setSurvey] = useState<Survey | null>(null);
   const [regions, setRegions] = useState<SurveyRegion[]>([]);
+  const [regionRows, setRegionRows] = useState<SurveyRegion[]>([]);
   const [regionCodeFilters, setRegionCodeFilters] = useState<RegionCodeFilters>(
-    defaultRegionCodeFilters,
+    () => buildRegionFiltersFromSearchParams(searchParams),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -217,7 +293,18 @@ const SurveyDetailPage = () => {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateSuccess, setUpdateSuccess] = useState<string | null>(null);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
-  const [regionPage, setRegionPage] = useState(1);
+  const [regionPage, setRegionPage] = useState(() =>
+    parseRegionPageParam(searchParams.get("page")),
+  );
+  const [regionPageSize, setRegionPageSize] = useState(() =>
+    parseRegionPageSizeParam(searchParams.get("pageSize")),
+  );
+  const [regionTotal, setRegionTotal] = useState(0);
+  const [regionTotalPages, setRegionTotalPages] = useState(1);
+  const [assignmentAvailabilityFilter, setAssignmentAvailabilityFilter] =
+    useState<AssignmentAvailabilityFilter>(() =>
+      parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
+    );
   const [backendFasihAvailable, setBackendFasihAvailable] = useState(false);
   const [backendFasihLoading, setBackendFasihLoading] = useState(true);
   const importRegionInputRef = useRef<HTMLInputElement | null>(null);
@@ -419,52 +506,16 @@ const SurveyDetailPage = () => {
     ],
   );
 
-  const filteredRegions = useMemo(
-    () =>
-      regions
-        .filter(
-          (row) =>
-            !effectiveLevel1Filter || row.level_1 === effectiveLevel1Filter,
-        )
-        .filter(
-          (row) =>
-            !effectiveLevel2Filter || row.level_2 === effectiveLevel2Filter,
-        )
-        .filter(
-          (row) =>
-            !regionCodeFilters.kdkec || row.level_3 === regionCodeFilters.kdkec,
-        )
-        .filter(
-          (row) =>
-            !regionCodeFilters.kddesa ||
-            row.level_4 === regionCodeFilters.kddesa,
-        )
-        .filter(
-          (row) =>
-            !regionCodeFilters.kdsls || row.level_5 === regionCodeFilters.kdsls,
-        )
-        .filter(
-          (row) =>
-            !regionCodeFilters.kdsubsls ||
-            row.level_6 === regionCodeFilters.kdsubsls,
-        )
-        .sort((a, b) => a.full_code.localeCompare(b.full_code)),
-    [effectiveLevel1Filter, effectiveLevel2Filter, regionCodeFilters, regions],
-  );
-
-  const totalRegionPages = Math.max(
-    1,
-    Math.ceil(filteredRegions.length / REGION_PAGE_SIZE),
-  );
+  const currentRegionPage = Math.max(1, regionPage);
 
   const visibleRegionPaginationItems = useMemo<(number | "ellipsis")[]>(() => {
-    if (totalRegionPages <= 7) {
-      return Array.from({ length: totalRegionPages }, (_, index) => index + 1);
+    if (regionTotalPages <= 7) {
+      return Array.from({ length: regionTotalPages }, (_, index) => index + 1);
     }
 
     const items: (number | "ellipsis")[] = [1];
-    const start = Math.max(2, regionPage - 1);
-    const end = Math.min(totalRegionPages - 1, regionPage + 1);
+    const start = Math.max(2, currentRegionPage - 1);
+    const end = Math.min(regionTotalPages - 1, currentRegionPage + 1);
 
     if (start > 2) {
       items.push("ellipsis");
@@ -474,22 +525,15 @@ const SurveyDetailPage = () => {
       items.push(page);
     }
 
-    if (end < totalRegionPages - 1) {
+    if (end < regionTotalPages - 1) {
       items.push("ellipsis");
     }
 
-    items.push(totalRegionPages);
+    items.push(regionTotalPages);
     return items;
-  }, [regionPage, totalRegionPages]);
+  }, [currentRegionPage, regionTotalPages]);
 
-  const paginatedRegions = useMemo(
-    () =>
-      filteredRegions.slice(
-        (regionPage - 1) * REGION_PAGE_SIZE,
-        regionPage * REGION_PAGE_SIZE,
-      ),
-    [filteredRegions, regionPage],
-  );
+  const paginatedRegions = useMemo(() => regionRows, [regionRows]);
 
   const loadSurvey = useCallback(async () => {
     if (!surveyPeriodId) {
@@ -508,8 +552,19 @@ const SurveyDetailPage = () => {
 
       setSurvey(surveyResult);
       setRegions(regionResult);
-      setRegionCodeFilters(buildInitialRegionFilters(surveyResult));
-      setRegionPage(1);
+      const regionFiltersFromQuery = buildRegionFiltersFromSearchParams(searchParams);
+      const normalizedFilters = normalizeRegionCodeFilters({
+        ...regionFiltersFromQuery,
+        kdprov: surveyResult.region_level_1 || regionFiltersFromQuery.kdprov,
+        kdkab: surveyResult.region_level_2 || regionFiltersFromQuery.kdkab,
+      });
+
+      setRegionCodeFilters(normalizedFilters);
+      setRegionPage(parseRegionPageParam(searchParams.get("page")));
+      setRegionPageSize(parseRegionPageSizeParam(searchParams.get("pageSize")));
+      setAssignmentAvailabilityFilter(
+        parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
+      );
       setUpdateForm({
         name: surveyResult.name,
         survey_id: surveyResult.survey_id,
@@ -530,7 +585,137 @@ const SurveyDetailPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [surveyPeriodId]);
+  }, [searchParams, surveyPeriodId]);
+
+  useEffect(() => {
+    if (!surveyPeriodId) {
+      return;
+    }
+
+    let active = true;
+
+    const loadRegionPage = async () => {
+      try {
+        const filter = {
+          region_level_1: effectiveLevel1Filter,
+          region_level_2: effectiveLevel2Filter,
+          region_level_3: regionCodeFilters.kdkec,
+          region_level_4: regionCodeFilters.kddesa,
+          region_level_5: regionCodeFilters.kdsls,
+          region_level_6: regionCodeFilters.kdsubsls,
+          assignment_filter:
+            assignmentAvailabilityFilter === "all"
+              ? undefined
+              : assignmentAvailabilityFilter,
+        };
+
+        const result = await fetchSurveyRegionsPage(
+          surveyPeriodId,
+          filter,
+          { page: currentRegionPage, per_page: regionPageSize },
+        );
+
+        if (!active) {
+          return;
+        }
+
+        setRegionRows(result.items);
+        setRegionTotal(result.meta.total);
+        setRegionTotalPages(Math.max(1, result.meta.pages));
+        setRegionPage(Math.max(1, result.meta.page));
+      } catch {
+        if (!active) {
+          return;
+        }
+
+        setRegionRows([]);
+        setRegionTotal(0);
+        setRegionTotalPages(1);
+      }
+    };
+
+    void loadRegionPage();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    assignmentAvailabilityFilter,
+    currentRegionPage,
+    effectiveLevel1Filter,
+    effectiveLevel2Filter,
+    regionCodeFilters.kddesa,
+    regionCodeFilters.kdkec,
+    regionCodeFilters.kdsls,
+    regionCodeFilters.kdsubsls,
+    regionPageSize,
+    surveyPeriodId,
+  ]);
+
+  useEffect(() => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    const activeFilters = normalizeRegionCodeFilters({
+      kdprov: effectiveLevel1Filter,
+      kdkab: effectiveLevel2Filter,
+      kdkec: regionCodeFilters.kdkec,
+      kddesa: regionCodeFilters.kddesa,
+      kdsls: regionCodeFilters.kdsls,
+      kdsubsls: regionCodeFilters.kdsubsls,
+    });
+
+    const filterEntries: [keyof RegionCodeFilters, string][] = [
+      ["kdprov", activeFilters.kdprov],
+      ["kdkab", activeFilters.kdkab],
+      ["kdkec", activeFilters.kdkec],
+      ["kddesa", activeFilters.kddesa],
+      ["kdsls", activeFilters.kdsls],
+      ["kdsubsls", activeFilters.kdsubsls],
+    ];
+
+    for (const [key, value] of filterEntries) {
+      if (value) {
+        nextSearchParams.set(key, value);
+      } else {
+        nextSearchParams.delete(key);
+      }
+    }
+
+    if (assignmentAvailabilityFilter === "all") {
+      nextSearchParams.delete("assignment");
+    } else {
+      nextSearchParams.set("assignment", assignmentAvailabilityFilter);
+    }
+
+    if (currentRegionPage <= 1) {
+      nextSearchParams.delete("page");
+    } else {
+      nextSearchParams.set("page", String(currentRegionPage));
+    }
+
+    if (regionPageSize === REGION_PAGE_SIZE_OPTIONS[0]) {
+      nextSearchParams.delete("pageSize");
+    } else {
+      nextSearchParams.set("pageSize", String(regionPageSize));
+    }
+
+    const current = searchParams.toString();
+    const next = nextSearchParams.toString();
+    if (next !== current) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  }, [
+    assignmentAvailabilityFilter,
+    effectiveLevel1Filter,
+    effectiveLevel2Filter,
+    regionCodeFilters.kddesa,
+    regionCodeFilters.kdkec,
+    regionCodeFilters.kdsls,
+    regionCodeFilters.kdsubsls,
+    currentRegionPage,
+    regionPageSize,
+    searchParams,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -936,6 +1121,19 @@ const SurveyDetailPage = () => {
 
   function handleResetFilter() {
     setRegionCodeFilters(buildInitialRegionFilters(survey));
+    setAssignmentAvailabilityFilter("all");
+    setRegionPage(1);
+  }
+
+  function handleAssignmentAvailabilityFilterChange(
+    value: AssignmentAvailabilityFilter,
+  ) {
+    setAssignmentAvailabilityFilter(value);
+    setRegionPage(1);
+  }
+
+  function handleRegionPageSizeChange(value: string) {
+    setRegionPageSize(parseRegionPageSizeParam(value));
     setRegionPage(1);
   }
 
@@ -959,7 +1157,7 @@ const SurveyDetailPage = () => {
           </CardDescription>
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline">
-              Total Region: {filteredRegions.length}
+              Total Region: {regionTotal}
             </Badge>
             <input
               ref={importRegionInputRef}
@@ -1392,6 +1590,7 @@ const SurveyDetailPage = () => {
                 </SelectContent>
               </Select>
             </Label>
+
           </div>
 
           <Table>
@@ -1403,7 +1602,51 @@ const SurveyDetailPage = () => {
                 <TableHead>Desa/Kelurahan</TableHead>
                 <TableHead>SLS</TableHead>
                 <TableHead>Sub SLS</TableHead>
-                <TableHead>Jumlah Assignment</TableHead>
+                <TableHead className="min-w-44">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Jumlah Assignment</span>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant={
+                            assignmentAvailabilityFilter === "all"
+                              ? "outline"
+                              : "default"
+                          }
+                          aria-label="Filter jumlah assignment"
+                        >
+                          <Filter className="size-3.5" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-56 p-3">
+                        <Label className="grid gap-1">
+                          <span>Filter Jumlah Assignment</span>
+                          <Select
+                            value={assignmentAvailabilityFilter}
+                            onValueChange={(value) =>
+                              handleAssignmentAvailabilityFilterChange(
+                                value as AssignmentAvailabilityFilter,
+                              )
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-full">
+                              <SelectValue placeholder="Semua" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">Semua</SelectItem>
+                              <SelectItem value="has">Ada Assignment</SelectItem>
+                              <SelectItem value="none">
+                                Tidak Ada Assignment
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </Label>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </TableHead>
                 <TableHead>Aksi</TableHead>
               </TableRow>
             </TableHeader>
@@ -1479,13 +1722,36 @@ const SurveyDetailPage = () => {
           <div className="flex flex-col gap-3 border-t pt-4 md:flex-row md:items-center md:justify-between">
             <p className="text-xs text-muted-foreground">
               Menampilkan{" "}
-              {filteredRegions.length === 0
+              {regionTotal === 0
                 ? 0
-                : (regionPage - 1) * REGION_PAGE_SIZE + 1}
-              -{Math.min(regionPage * REGION_PAGE_SIZE, filteredRegions.length)}{" "}
-              dari {filteredRegions.length} data.
+                : (currentRegionPage - 1) * regionPageSize + 1}
+              -
+              {Math.min(
+                currentRegionPage * regionPageSize,
+                regionTotal,
+              )}{" "}
+              dari {regionTotal} data.
             </p>
-            <Pagination className="mx-0 w-auto justify-start md:justify-end">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Per halaman</span>
+                <Select
+                  value={String(regionPageSize)}
+                  onValueChange={handleRegionPageSizeChange}
+                >
+                  <SelectTrigger className="h-8 w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REGION_PAGE_SIZE_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={String(option)}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Pagination className="mx-0 w-auto justify-start md:justify-end">
               <PaginationContent>
                 <PaginationItem>
                   <PaginationPrevious
@@ -1495,9 +1761,9 @@ const SurveyDetailPage = () => {
                       event.preventDefault();
                       setRegionPage((current) => Math.max(1, current - 1));
                     }}
-                    aria-disabled={regionPage === 1}
+                    aria-disabled={currentRegionPage === 1}
                     className={
-                      regionPage === 1
+                      currentRegionPage === 1
                         ? "pointer-events-none opacity-50"
                         : undefined
                     }
@@ -1517,7 +1783,7 @@ const SurveyDetailPage = () => {
                     <PaginationItem key={item}>
                       <PaginationLink
                         href="#"
-                        isActive={item === regionPage}
+                        isActive={item === currentRegionPage}
                         onClick={(event) => {
                           event.preventDefault();
                           setRegionPage(item);
@@ -1536,19 +1802,20 @@ const SurveyDetailPage = () => {
                     onClick={(event) => {
                       event.preventDefault();
                       setRegionPage((current) =>
-                        Math.min(totalRegionPages, current + 1),
+                        Math.min(regionTotalPages, current + 1),
                       );
                     }}
-                    aria-disabled={regionPage === totalRegionPages}
+                    aria-disabled={currentRegionPage === regionTotalPages}
                     className={
-                      regionPage === totalRegionPages
+                      currentRegionPage === regionTotalPages
                         ? "pointer-events-none opacity-50"
                         : undefined
                     }
                   />
                 </PaginationItem>
               </PaginationContent>
-            </Pagination>
+              </Pagination>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -1,6 +1,7 @@
 import type { AssignmentLogPoint } from "@/types/assignment";
+import type { ApiEnvelope } from "@/types/api";
 import type { SurveyRegion } from "@/types/region";
-import { API_BASE_URL, requestJson } from "@/lib/http-client";
+import { API_BASE_URL, requestJson, requestWithAuth } from "@/lib/http-client";
 
 export type SurveyRegionFilter = {
   region_full_code?: string;
@@ -10,6 +11,24 @@ export type SurveyRegionFilter = {
   region_level_4?: string;
   region_level_5?: string;
   region_level_6?: string;
+  assignment_filter?: "has" | "none";
+};
+
+export type SurveyRegionPagination = {
+  page: number;
+  per_page: number;
+};
+
+export type SurveyRegionPageMeta = {
+  total: number;
+  pages: number;
+  page: number;
+  per_page: number;
+};
+
+export type SurveyRegionsPageResult = {
+  items: SurveyRegion[];
+  meta: SurveyRegionPageMeta;
 };
 
 export type SurveyRegionLogsFilter = {
@@ -39,13 +58,53 @@ export async function fetchSurveyRegions(
   );
 }
 
-export async function syncSurveyRegions(
+export async function fetchSurveyRegionsPage(
   surveyPeriodId: string,
-): Promise<void> {
-  await requestJson<null>(`${API_BASE_URL}/surveys/${surveyPeriodId}/regions/sync`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  filter: SurveyRegionFilter,
+  pagination: SurveyRegionPagination,
+): Promise<SurveyRegionsPageResult> {
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(filter)) {
+    if (value && value.trim() !== "") {
+      params.set(key, value);
+    }
+  }
+
+  params.set("page", String(pagination.page));
+  params.set("per_page", String(pagination.per_page));
+
+  const response = await requestWithAuth(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions?${params.toString()}`,
+  );
+  const payload = (await response.json()) as ApiEnvelope<SurveyRegion[]>;
+
+  if (!response.ok) {
+    const message = payload.message || "Request failed";
+    const details = payload.errors?.join(", ") || "";
+    throw new Error(details ? `${message}: ${details}` : message);
+  }
+
+  const metaRaw = (payload.meta || {}) as Partial<SurveyRegionPageMeta>;
+  return {
+    items: payload.data || [],
+    meta: {
+      total: Number(metaRaw.total || 0),
+      pages: Number(metaRaw.pages || 1),
+      page: Number(metaRaw.page || pagination.page),
+      per_page: Number(metaRaw.per_page || pagination.per_page),
+    },
+  };
+}
+
+export async function syncSurveyRegions(surveyPeriodId: string): Promise<void> {
+  await requestJson<null>(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/sync`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 export async function importSurveyRegions(
