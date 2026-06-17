@@ -20,7 +20,10 @@ import {
   fetchSurveyRegionFilterOptions,
   type RegionFilterOptionsResponse,
 } from "@/services/region";
-import { fetchSystemFeatures } from "@/services/system";
+import {
+  fetchSystemFasihAuthorization,
+  fetchSystemFeatures,
+} from "@/services/system";
 import type { Survey, UpdateSurveyRequest } from "@/types/survey";
 import type { SurveyRegion } from "@/types/region";
 import { Badge } from "@/components/ui/badge";
@@ -298,11 +301,16 @@ const SurveyDetailPage = () => {
     const loadBackendFasihAccess = async () => {
       setBackendFasihLoading(true);
       try {
-        const features = await fetchSystemFeatures();
+        const [features, auth] = await Promise.all([
+          fetchSystemFeatures(),
+          fetchSystemFasihAuthorization(surveyPeriodId),
+        ]);
         if (!active) {
           return;
         }
-        setBackendFasihAvailable(Boolean(features.fasih_available));
+        setBackendFasihAvailable(
+          Boolean(features.fasih_available) && Boolean(auth.fasih_authorized),
+        );
       } catch {
         if (!active) {
           return;
@@ -320,7 +328,7 @@ const SurveyDetailPage = () => {
     return () => {
       active = false;
     };
-  }, []);
+  }, [surveyPeriodId]);
 
   const kdkecOptions = useMemo(
     () => regionFilterOptions?.level_3 || [],
