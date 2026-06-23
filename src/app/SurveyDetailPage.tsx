@@ -61,6 +61,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Popover,
   PopoverContent,
@@ -89,6 +90,20 @@ type RegionCodeFilters = {
 const ALL_FILTER_VALUE = "__all__";
 const REGION_PAGE_SIZE_OPTIONS = [10, 50, 100, 1000] as const;
 type AssignmentAvailabilityFilter = "all" | "has" | "none";
+type RegionStatusFilter =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "revoked";
+
+const REGION_STATUS_FILTER_OPTIONS: { value: RegionStatusFilter; label: string }[] = [
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+  { value: "revoked", label: "Revoked" },
+];
 
 function parseRegionPageParam(rawValue: string | null): number {
   const value = Number(rawValue || "1");
@@ -124,6 +139,27 @@ function parseAssignmentAvailabilityFilter(
   }
 
   return "all";
+}
+
+function parseRegionStatusFilter(rawValue: string | null): RegionStatusFilter[] {
+  if (!rawValue) {
+    return [];
+  }
+
+  const allowed = new Set<RegionStatusFilter>(
+    REGION_STATUS_FILTER_OPTIONS.map((item) => item.value),
+  );
+  const selected = new Set<RegionStatusFilter>();
+  for (const token of rawValue.split(",")) {
+    const value = token.trim().toLowerCase() as RegionStatusFilter;
+    if (allowed.has(value)) {
+      selected.add(value);
+    }
+  }
+
+  return REGION_STATUS_FILTER_OPTIONS.map((item) => item.value).filter((value) =>
+    selected.has(value),
+  );
 }
 
 function normalizeRegionCodeFilters(
@@ -244,6 +280,10 @@ const SurveyDetailPage = () => {
   const [assignmentAvailabilityFilter, setAssignmentAvailabilityFilter] =
     useState<AssignmentAvailabilityFilter>(() =>
       parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
+    );
+  const [regionStatusFilters, setRegionStatusFilters] =
+    useState<RegionStatusFilter[]>(() =>
+      parseRegionStatusFilter(searchParams.get("status")),
     );
   const [backendFasihAvailable, setBackendFasihAvailable] = useState(false);
   const [backendFasihLoading, setBackendFasihLoading] = useState(true);
@@ -378,6 +418,7 @@ const SurveyDetailPage = () => {
   }, [currentRegionPage, regionTotalPages]);
 
   const paginatedRegions = useMemo(() => regionRows, [regionRows]);
+  const selectedStatusCount = regionStatusFilters.length;
 
   const loadSurvey = useCallback(async () => {
     if (!surveyPeriodId) {
@@ -453,6 +494,10 @@ const SurveyDetailPage = () => {
             assignmentAvailabilityFilter === "all"
               ? undefined
               : assignmentAvailabilityFilter,
+          status_filter:
+            regionStatusFilters.length === 0
+              ? undefined
+              : regionStatusFilters.join(","),
         };
 
         const result = await fetchSurveyRegionsPage(surveyPeriodId, filter, {
@@ -486,6 +531,7 @@ const SurveyDetailPage = () => {
     };
   }, [
     assignmentAvailabilityFilter,
+    regionStatusFilters,
     currentRegionPage,
     effectiveLevel1Filter,
     effectiveLevel2Filter,
@@ -531,6 +577,12 @@ const SurveyDetailPage = () => {
       nextSearchParams.set("assignment", assignmentAvailabilityFilter);
     }
 
+    if (regionStatusFilters.length === 0) {
+      nextSearchParams.delete("status");
+    } else {
+      nextSearchParams.set("status", regionStatusFilters.join(","));
+    }
+
     if (currentRegionPage <= 1) {
       nextSearchParams.delete("page");
     } else {
@@ -550,6 +602,7 @@ const SurveyDetailPage = () => {
     }
   }, [
     assignmentAvailabilityFilter,
+    regionStatusFilters,
     effectiveLevel1Filter,
     effectiveLevel2Filter,
     regionCodeFilters.kddesa,
@@ -593,6 +646,7 @@ const SurveyDetailPage = () => {
     setAssignmentAvailabilityFilter(
       parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
     );
+    setRegionStatusFilters(parseRegionStatusFilter(searchParams.get("status")));
   }, [survey]); // Only run once after survey is loaded
 
   // Refetch filter options when region filters change for cascading effect
@@ -1094,6 +1148,7 @@ const SurveyDetailPage = () => {
   function handleResetFilter() {
     setRegionCodeFilters(buildInitialRegionFilters(survey));
     setAssignmentAvailabilityFilter("all");
+    setRegionStatusFilters([]);
     setRegionPage(1);
   }
 
@@ -1101,6 +1156,30 @@ const SurveyDetailPage = () => {
     value: AssignmentAvailabilityFilter,
   ) {
     setAssignmentAvailabilityFilter(value);
+    setRegionPage(1);
+  }
+
+  function handleRegionStatusFilterChange(value: RegionStatusFilter, checked: boolean) {
+    setRegionStatusFilters((current) => {
+      if (checked) {
+        if (current.includes(value)) {
+          return current;
+        }
+        return [...current, value];
+      }
+
+      return current.filter((item) => item !== value);
+    });
+    setRegionPage(1);
+  }
+
+  function handleSelectAllRegionStatusFilters() {
+    setRegionStatusFilters(REGION_STATUS_FILTER_OPTIONS.map((item) => item.value));
+    setRegionPage(1);
+  }
+
+  function handleClearRegionStatusFilters() {
+    setRegionStatusFilters([]);
     setRegionPage(1);
   }
 
@@ -1585,14 +1664,22 @@ const SurveyDetailPage = () => {
                 <TableHead>Sub SLS</TableHead>
                 <TableHead className="min-w-44">
                   <div className="flex items-center justify-between gap-2">
-                    <span>Jumlah Assignment</span>
+                    <div className="flex items-center gap-2">
+                      <span>Jumlah Assignment</span>
+                      {selectedStatusCount > 0 && (
+                        <Badge variant="outline" className="text-[10px]">
+                          {selectedStatusCount} status
+                        </Badge>
+                      )}
+                    </div>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button
                           type="button"
                           size="icon-xs"
                           variant={
-                            assignmentAvailabilityFilter === "all"
+                            assignmentAvailabilityFilter === "all" &&
+                            regionStatusFilters.length === 0
                               ? "outline"
                               : "default"
                           }
@@ -1602,34 +1689,82 @@ const SurveyDetailPage = () => {
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent align="end" className="w-56 p-3">
-                        <Label className="grid gap-1">
-                          <span>Filter Jumlah Assignment</span>
-                          <Select
-                            value={assignmentAvailabilityFilter}
-                            onValueChange={(value) =>
-                              handleAssignmentAvailabilityFilterChange(
-                                value as AssignmentAvailabilityFilter,
-                              )
-                            }
-                          >
-                            <SelectTrigger className="h-8 w-full">
-                              <SelectValue placeholder="Semua" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">Semua</SelectItem>
-                              <SelectItem value="has">
-                                Ada Assignment
-                              </SelectItem>
-                              <SelectItem value="none">
-                                Tidak Ada Assignment
-                              </SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </Label>
+                        <div className="grid gap-3">
+                          <Label className="grid gap-1">
+                            <span>Filter Jumlah Assignment</span>
+                            <Select
+                              value={assignmentAvailabilityFilter}
+                              onValueChange={(value) =>
+                                handleAssignmentAvailabilityFilterChange(
+                                  value as AssignmentAvailabilityFilter,
+                                )
+                              }
+                            >
+                              <SelectTrigger className="h-8 w-full">
+                                <SelectValue placeholder="Semua" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">Semua</SelectItem>
+                                <SelectItem value="has">
+                                  Ada Assignment
+                                </SelectItem>
+                                <SelectItem value="none">
+                                  Tidak Ada Assignment
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </Label>
+                          <Label className="grid gap-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span>Status Assignment</span>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px]"
+                                  onClick={handleSelectAllRegionStatusFilters}
+                                >
+                                  Pilih Semua
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-[10px]"
+                                  onClick={handleClearRegionStatusFilters}
+                                >
+                                  Bersihkan
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="grid gap-2 rounded-sm border p-2">
+                              {REGION_STATUS_FILTER_OPTIONS.map((option) => (
+                                <label
+                                  key={option.value}
+                                  className="flex items-center gap-2 text-xs"
+                                >
+                                  <Checkbox
+                                    checked={regionStatusFilters.includes(option.value)}
+                                    onCheckedChange={(checked) =>
+                                      handleRegionStatusFilterChange(option.value, checked === true)
+                                    }
+                                  />
+                                  <span>{option.label}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </Label>
+                        </div>
                       </PopoverContent>
                     </Popover>
                   </div>
                 </TableHead>
+                <TableHead>Draft</TableHead>
+                <TableHead>Submitted</TableHead>
+                <TableHead>Approved</TableHead>
+                <TableHead>Rejected</TableHead>
+                <TableHead>Revoked</TableHead>
                 <TableHead>Aksi</TableHead>
               </TableRow>
             </TableHeader>
@@ -1653,6 +1788,11 @@ const SurveyDetailPage = () => {
                   </TableCell>
                   <TableCell>{row.level_6 || "-"}</TableCell>
                   <TableCell>{row.assignment_count}</TableCell>
+                  <TableCell>{row.draft_count ?? 0}</TableCell>
+                  <TableCell>{row.submitted_count ?? 0}</TableCell>
+                  <TableCell>{row.approved_count ?? 0}</TableCell>
+                  <TableCell>{row.rejected_count ?? 0}</TableCell>
+                  <TableCell>{row.revoked_count ?? 0}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-2">
                       <Button asChild size="sm" variant="outline">

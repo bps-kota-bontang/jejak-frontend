@@ -12,6 +12,7 @@ export type SurveyRegionFilter = {
   region_level_5?: string;
   region_level_6?: string;
   assignment_filter?: "has" | "none";
+  status_filter?: string;
 };
 
 export type SurveyRegionPagination = {
