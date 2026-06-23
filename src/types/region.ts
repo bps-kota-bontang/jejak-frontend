@@ -21,6 +21,9 @@ export type SurveyRegion = {
   level_4_label?: string;
   level_5_label?: string;
   level_6_label?: string;
+  pj?: string;
+  pml?: string;
+  ppl?: string;
   full_code: string;
 };
 

@@ -11,6 +11,9 @@ export type SurveyRegionFilter = {
   region_level_4?: string;
   region_level_5?: string;
   region_level_6?: string;
+  pj?: string;
+  pml?: string;
+  ppl?: string;
   assignment_filter?: "has" | "none";
   status_filter?: string;
 };
@@ -180,6 +183,53 @@ export async function importSurveyRegions(
       body: formData,
     },
   );
+}
+
+export async function importSurveyRegionContacts(
+  surveyPeriodId: string,
+  file: File,
+): Promise<void> {
+  const formData = new FormData();
+  formData.set("file", file);
+
+  await requestJson<null>(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/contacts/import`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export async function downloadSurveyRegionContactsTemplate(
+  surveyPeriodId: string,
+): Promise<void> {
+  const response = await requestWithAuth(
+    `${API_BASE_URL}/surveys/${surveyPeriodId}/regions/contacts/template`,
+  );
+
+  if (!response.ok) {
+    let message = "Gagal mengunduh template kontak region";
+    try {
+      const payload = (await response.json()) as ApiEnvelope<null>;
+      message = payload.message || message;
+    } catch {
+      // ignore parse failures for binary endpoints
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const contentDisposition = response.headers.get("Content-Disposition") || "";
+  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+  link.href = url;
+  link.download = filenameMatch?.[1] || `survey-region-contacts-${surveyPeriodId}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export async function fetchSurveyRegionLogs(

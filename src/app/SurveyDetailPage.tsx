@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
-  analyzeSurveyAssignmentsByRegion,
   analyzeSurveyAssignments,
+  analyzeSurveyAssignmentsByRegion,
   fetchSurveyByPeriodId,
   importSurveyAssignments,
   syncSurveyAssignments,
@@ -10,22 +10,24 @@ import {
   updateSurvey,
 } from "@/services/survey";
 import {
+  downloadSurveyRegionContactsTemplate,
+  fetchSurveyRegionFilterOptions,
+  fetchSurveyRegionsPage,
+  importSurveyRegionContacts,
+  importSurveyRegions,
+  syncSurveyRegions,
+  type RegionFilterOptionsResponse,
+} from "@/services/region";
+import {
   connectSurveyToExtension,
   importSurveyCredentialsFromBrowser,
 } from "@/services/extension";
 import {
-  fetchSurveyRegionsPage,
-  importSurveyRegions,
-  syncSurveyRegions,
-  fetchSurveyRegionFilterOptions,
-  type RegionFilterOptionsResponse,
-} from "@/services/region";
-import {
   fetchSystemFasihAuthorization,
   fetchSystemFeatures,
 } from "@/services/system";
-import type { Survey, UpdateSurveyRequest } from "@/types/survey";
 import type { SurveyRegion } from "@/types/region";
+import type { Survey, UpdateSurveyRequest } from "@/types/survey";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +37,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -53,7 +56,11 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -61,12 +68,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -75,6 +76,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/providers/AuthProvider";
 import { Filter } from "lucide-react";
 
@@ -85,6 +87,9 @@ type RegionCodeFilters = {
   kddesa: string;
   kdsls: string;
   kdsubsls: string;
+  pj: string;
+  pml: string;
+  ppl: string;
 };
 
 const ALL_FILTER_VALUE = "__all__";
@@ -177,6 +182,9 @@ function normalizeRegionCodeFilters(
     kddesa: filters.kddesa.trim(),
     kdsls: filters.kdsls.trim(),
     kdsubsls: filters.kdsubsls.trim(),
+    pj: filters.pj.trim(),
+    pml: filters.pml.trim(),
+    ppl: filters.ppl.trim(),
   };
 
   if (!normalized.kdprov) {
@@ -208,6 +216,9 @@ function buildRegionFiltersFromSearchParams(
     kddesa: searchParams.get("kddesa") || "",
     kdsls: searchParams.get("kdsls") || "",
     kdsubsls: searchParams.get("kdsubsls") || "",
+    pj: searchParams.get("pj") || "",
+    pml: searchParams.get("pml") || "",
+    ppl: searchParams.get("ppl") || "",
   });
 }
 
@@ -222,6 +233,9 @@ function buildInitialRegionFilters(survey: Survey | null): RegionCodeFilters {
     kddesa: "",
     kdsls: "",
     kdsubsls: "",
+    pj: "",
+    pml: "",
+    ppl: "",
   };
 }
 
@@ -242,6 +256,8 @@ const SurveyDetailPage = () => {
     | "sync-assignment-backend"
     | "sync-assignment-region-backend"
     | "import-region"
+    | "import-region-contacts"
+    | "download-region-contacts-template"
     | "import-assignment"
     | "connect-survey"
     | null
@@ -294,6 +310,7 @@ const SurveyDetailPage = () => {
   const [regionFilterOptions, setRegionFilterOptions] =
     useState<RegionFilterOptionsResponse | null>(null);
   const importRegionInputRef = useRef<HTMLInputElement | null>(null);
+  const importRegionContactsInputRef = useRef<HTMLInputElement | null>(null);
   const importAssignmentInputRef = useRef<HTMLInputElement | null>(null);
 
   const isLevel1Locked = Boolean(survey?.region_level_1);
@@ -452,6 +469,9 @@ const SurveyDetailPage = () => {
         kddesa: "",
         kdsls: "",
         kdsubsls: "",
+        pj: "",
+        pml: "",
+        ppl: "",
       });
 
       setRegionCodeFilters(normalizedFilters);
@@ -494,6 +514,9 @@ const SurveyDetailPage = () => {
           region_level_4: regionCodeFilters.kddesa,
           region_level_5: regionCodeFilters.kdsls,
           region_level_6: regionCodeFilters.kdsubsls,
+          pj: regionCodeFilters.pj,
+          pml: regionCodeFilters.pml,
+          ppl: regionCodeFilters.ppl,
           assignment_filter:
             assignmentAvailabilityFilter === "all"
               ? undefined
@@ -543,6 +566,9 @@ const SurveyDetailPage = () => {
     regionCodeFilters.kdkec,
     regionCodeFilters.kdsls,
     regionCodeFilters.kdsubsls,
+    regionCodeFilters.pj,
+    regionCodeFilters.pml,
+    regionCodeFilters.ppl,
     regionPageSize,
     surveyPeriodId,
   ]);
@@ -556,6 +582,9 @@ const SurveyDetailPage = () => {
       kddesa: regionCodeFilters.kddesa,
       kdsls: regionCodeFilters.kdsls,
       kdsubsls: regionCodeFilters.kdsubsls,
+      pj: regionCodeFilters.pj,
+      pml: regionCodeFilters.pml,
+      ppl: regionCodeFilters.ppl,
     });
 
     const filterEntries: [keyof RegionCodeFilters, string][] = [
@@ -565,6 +594,9 @@ const SurveyDetailPage = () => {
       ["kddesa", activeFilters.kddesa],
       ["kdsls", activeFilters.kdsls],
       ["kdsubsls", activeFilters.kdsubsls],
+      ["pj", activeFilters.pj],
+      ["pml", activeFilters.pml],
+      ["ppl", activeFilters.ppl],
     ];
 
     for (const [key, value] of filterEntries) {
@@ -868,6 +900,10 @@ const SurveyDetailPage = () => {
     importRegionInputRef.current?.click();
   }
 
+  function handleChooseImportRegionContactsFile() {
+    importRegionContactsInputRef.current?.click();
+  }
+
   function handleChooseImportAssignmentFile() {
     importAssignmentInputRef.current?.click();
   }
@@ -894,6 +930,52 @@ const SurveyDetailPage = () => {
       if (importRegionInputRef.current) {
         importRegionInputRef.current.value = "";
       }
+    }
+  }
+
+  async function handleImportRegionContactsFile(file: File | null) {
+    if (!surveyPeriodId || !file) {
+      return;
+    }
+
+    setActionLoading("import-region-contacts");
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await importSurveyRegionContacts(surveyPeriodId, file);
+      setActionSuccess("Import PJ, PML, dan PPL berhasil dijalankan.");
+      await loadSurvey();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal import kontak region";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
+      if (importRegionContactsInputRef.current) {
+        importRegionContactsInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleDownloadRegionContactsTemplate() {
+    if (!surveyPeriodId) {
+      return;
+    }
+
+    setActionLoading("download-region-contacts-template");
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await downloadSurveyRegionContactsTemplate(surveyPeriodId);
+      setActionSuccess("Template PJ, PML, dan PPL berhasil diunduh.");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Gagal mengunduh template kontak region";
+      setActionError(message);
+    } finally {
+      setActionLoading(null);
     }
   }
 
@@ -1103,6 +1185,9 @@ const SurveyDetailPage = () => {
           kddesa: "",
           kdsls: "",
           kdsubsls: "",
+          pj: current.pj,
+          pml: current.pml,
+          ppl: current.ppl,
         };
       }
 
@@ -1145,6 +1230,13 @@ const SurveyDetailPage = () => {
           ...current,
           kdsls: value,
           kdsubsls: "",
+        };
+      }
+
+      if (key === "pj" || key === "pml" || key === "ppl") {
+        return {
+          ...current,
+          [key]: value,
         };
       }
 
@@ -1234,6 +1326,16 @@ const SurveyDetailPage = () => {
               }}
             />
             <input
+              ref={importRegionContactsInputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0] || null;
+                void handleImportRegionContactsFile(file);
+              }}
+            />
+            <input
               ref={importAssignmentInputRef}
               type="file"
               accept="application/json,.json"
@@ -1282,6 +1384,26 @@ const SurveyDetailPage = () => {
               {actionLoading === "import-region"
                 ? "Import Region..."
                 : "Import Region"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleChooseImportRegionContactsFile}
+              disabled={actionLoading === "import-region-contacts"}
+            >
+              {actionLoading === "import-region-contacts"
+                ? "Import PJ/PML/PPL..."
+                : "Import PJ/PML/PPL"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleDownloadRegionContactsTemplate()}
+              disabled={actionLoading === "download-region-contacts-template"}
+            >
+              {actionLoading === "download-region-contacts-template"
+                ? "Mengunduh Template..."
+                : "Template PJ/PML/PPL"}
             </Button>
             <Button
               type="button"
@@ -1663,6 +1785,33 @@ const SurveyDetailPage = () => {
                 </SelectContent>
               </Select>
             </Label>
+
+            <Label className="grid gap-1">
+              <span>PJ</span>
+              <Input
+                value={regionCodeFilters.pj}
+                onChange={(event) => handleFilterChange("pj", event.target.value)}
+                placeholder="Filter PJ"
+              />
+            </Label>
+
+            <Label className="grid gap-1">
+              <span>PML</span>
+              <Input
+                value={regionCodeFilters.pml}
+                onChange={(event) => handleFilterChange("pml", event.target.value)}
+                placeholder="Filter PML"
+              />
+            </Label>
+
+            <Label className="grid gap-1">
+              <span>PPL</span>
+              <Input
+                value={regionCodeFilters.ppl}
+                onChange={(event) => handleFilterChange("ppl", event.target.value)}
+                placeholder="Filter PPL"
+              />
+            </Label>
           </div>
 
           <Table>
@@ -1674,6 +1823,9 @@ const SurveyDetailPage = () => {
                 <TableHead>Desa/Kelurahan</TableHead>
                 <TableHead>SLS</TableHead>
                 <TableHead>Sub SLS</TableHead>
+                <TableHead>PJ</TableHead>
+                <TableHead>PML</TableHead>
+                <TableHead>PPL</TableHead>
                 <TableHead className="min-w-44">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
@@ -1804,6 +1956,9 @@ const SurveyDetailPage = () => {
                     {row.level_5_label || row.level_5 || "-"}
                   </TableCell>
                   <TableCell>{row.level_6 || "-"}</TableCell>
+                  <TableCell>{row.pj || "-"}</TableCell>
+                  <TableCell>{row.pml || "-"}</TableCell>
+                  <TableCell>{row.ppl || "-"}</TableCell>
                   <TableCell>{row.assignment_count}</TableCell>
                   <TableCell>{row.draft_count ?? 0}</TableCell>
                   <TableCell>{row.submitted_count ?? 0}</TableCell>
