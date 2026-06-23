@@ -97,7 +97,10 @@ type RegionStatusFilter =
   | "rejected"
   | "revoked";
 
-const REGION_STATUS_FILTER_OPTIONS: { value: RegionStatusFilter; label: string }[] = [
+const REGION_STATUS_FILTER_OPTIONS: {
+  value: RegionStatusFilter;
+  label: string;
+}[] = [
   { value: "draft", label: "Draft" },
   { value: "submitted", label: "Submitted" },
   { value: "approved", label: "Approved" },
@@ -141,7 +144,9 @@ function parseAssignmentAvailabilityFilter(
   return "all";
 }
 
-function parseRegionStatusFilter(rawValue: string | null): RegionStatusFilter[] {
+function parseRegionStatusFilter(
+  rawValue: string | null,
+): RegionStatusFilter[] {
   if (!rawValue) {
     return [];
   }
@@ -157,8 +162,8 @@ function parseRegionStatusFilter(rawValue: string | null): RegionStatusFilter[] 
     }
   }
 
-  return REGION_STATUS_FILTER_OPTIONS.map((item) => item.value).filter((value) =>
-    selected.has(value),
+  return REGION_STATUS_FILTER_OPTIONS.map((item) => item.value).filter(
+    (value) => selected.has(value),
   );
 }
 
@@ -281,10 +286,9 @@ const SurveyDetailPage = () => {
     useState<AssignmentAvailabilityFilter>(() =>
       parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
     );
-  const [regionStatusFilters, setRegionStatusFilters] =
-    useState<RegionStatusFilter[]>(() =>
-      parseRegionStatusFilter(searchParams.get("status")),
-    );
+  const [regionStatusFilters, setRegionStatusFilters] = useState<
+    RegionStatusFilter[]
+  >(() => parseRegionStatusFilter(searchParams.get("status")));
   const [backendFasihAvailable, setBackendFasihAvailable] = useState(false);
   const [backendFasihLoading, setBackendFasihLoading] = useState(true);
   const [regionFilterOptions, setRegionFilterOptions] =
@@ -695,7 +699,10 @@ const SurveyDetailPage = () => {
         if (!active) {
           return;
         }
-        console.error("[loadFilterOptions] Failed to load filter options:", err);
+        console.error(
+          "[loadFilterOptions] Failed to load filter options:",
+          err,
+        );
       }
     };
 
@@ -1058,7 +1065,10 @@ const SurveyDetailPage = () => {
         survey_label: survey.name,
       });
 
-      console.log("[handleImportCredentialsToUpdateForm] Imported credentials:", result);
+      console.log(
+        "[handleImportCredentialsToUpdateForm] Imported credentials:",
+        result,
+      );
 
       setUpdateForm((current) => ({
         ...current,
@@ -1159,7 +1169,10 @@ const SurveyDetailPage = () => {
     setRegionPage(1);
   }
 
-  function handleRegionStatusFilterChange(value: RegionStatusFilter, checked: boolean) {
+  function handleRegionStatusFilterChange(
+    value: RegionStatusFilter,
+    checked: boolean,
+  ) {
     setRegionStatusFilters((current) => {
       if (checked) {
         if (current.includes(value)) {
@@ -1174,7 +1187,9 @@ const SurveyDetailPage = () => {
   }
 
   function handleSelectAllRegionStatusFilters() {
-    setRegionStatusFilters(REGION_STATUS_FILTER_OPTIONS.map((item) => item.value));
+    setRegionStatusFilters(
+      REGION_STATUS_FILTER_OPTIONS.map((item) => item.value),
+    );
     setRegionPage(1);
   }
 
@@ -1189,7 +1204,7 @@ const SurveyDetailPage = () => {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-4 p-4 md:p-6">
+    <main className="mx-auto w-full max-w-full space-y-4 p-4 md:p-6">
       <Card className="overflow-hidden border-border/70">
         <CardHeader className="bg-linear-to-br from-stone-100 via-orange-50 to-emerald-100">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1527,10 +1542,7 @@ const SurveyDetailPage = () => {
                     value === ALL_FILTER_VALUE ? "" : value,
                   )
                 }
-                disabled={
-                  isLevel2Locked ||
-                  !effectiveLevel1Filter
-                }
+                disabled={isLevel2Locked || !effectiveLevel1Filter}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Semua" />
@@ -1665,7 +1677,7 @@ const SurveyDetailPage = () => {
                 <TableHead className="min-w-44">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <span>Jumlah Assignment</span>
+                      <span>Total</span>
                       {selectedStatusCount > 0 && (
                         <Badge variant="outline" className="text-[10px]">
                           {selectedStatusCount} status
@@ -1683,7 +1695,7 @@ const SurveyDetailPage = () => {
                               ? "outline"
                               : "default"
                           }
-                          aria-label="Filter jumlah assignment"
+                          aria-label="Filter assignment"
                         >
                           <Filter className="size-3.5" />
                         </Button>
@@ -1691,7 +1703,7 @@ const SurveyDetailPage = () => {
                       <PopoverContent align="end" className="w-56 p-3">
                         <div className="grid gap-3">
                           <Label className="grid gap-1">
-                            <span>Filter Jumlah Assignment</span>
+                            <span>Filter Assignment</span>
                             <Select
                               value={assignmentAvailabilityFilter}
                               onValueChange={(value) =>
@@ -1716,7 +1728,7 @@ const SurveyDetailPage = () => {
                           </Label>
                           <Label className="grid gap-1">
                             <div className="flex items-center justify-between gap-2">
-                              <span>Status Assignment</span>
+                              <span>Status</span>
                               <div className="flex items-center gap-1">
                                 <Button
                                   type="button"
@@ -1745,9 +1757,14 @@ const SurveyDetailPage = () => {
                                   className="flex items-center gap-2 text-xs"
                                 >
                                   <Checkbox
-                                    checked={regionStatusFilters.includes(option.value)}
+                                    checked={regionStatusFilters.includes(
+                                      option.value,
+                                    )}
                                     onCheckedChange={(checked) =>
-                                      handleRegionStatusFilterChange(option.value, checked === true)
+                                      handleRegionStatusFilterChange(
+                                        option.value,
+                                        checked === true,
+                                      )
                                     }
                                   />
                                   <span>{option.label}</span>
