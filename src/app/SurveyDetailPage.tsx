@@ -972,7 +972,9 @@ const SurveyDetailPage = () => {
       setActionSuccess("Template PJ, PML, dan PPL berhasil diunduh.");
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Gagal mengunduh template kontak region";
+        err instanceof Error
+          ? err.message
+          : "Gagal mengunduh template kontak region";
       setActionError(message);
     } finally {
       setActionLoading(null);
@@ -1790,7 +1792,9 @@ const SurveyDetailPage = () => {
               <span>PJ</span>
               <Input
                 value={regionCodeFilters.pj}
-                onChange={(event) => handleFilterChange("pj", event.target.value)}
+                onChange={(event) =>
+                  handleFilterChange("pj", event.target.value)
+                }
                 placeholder="Filter PJ"
               />
             </Label>
@@ -1799,7 +1803,9 @@ const SurveyDetailPage = () => {
               <span>PML</span>
               <Input
                 value={regionCodeFilters.pml}
-                onChange={(event) => handleFilterChange("pml", event.target.value)}
+                onChange={(event) =>
+                  handleFilterChange("pml", event.target.value)
+                }
                 placeholder="Filter PML"
               />
             </Label>
@@ -1808,7 +1814,9 @@ const SurveyDetailPage = () => {
               <span>PPL</span>
               <Input
                 value={regionCodeFilters.ppl}
-                onChange={(event) => handleFilterChange("ppl", event.target.value)}
+                onChange={(event) =>
+                  handleFilterChange("ppl", event.target.value)
+                }
                 placeholder="Filter PPL"
               />
             </Label>
@@ -1817,8 +1825,8 @@ const SurveyDetailPage = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Provinsi</TableHead>
-                <TableHead>Kabupaten/Kota</TableHead>
+                {/* <TableHead>Provinsi</TableHead>
+                <TableHead>Kabupaten/Kota</TableHead> */}
                 <TableHead>Kecamatan</TableHead>
                 <TableHead>Desa/Kelurahan</TableHead>
                 <TableHead>SLS</TableHead>
@@ -1826,7 +1834,7 @@ const SurveyDetailPage = () => {
                 <TableHead>PJ</TableHead>
                 <TableHead>PML</TableHead>
                 <TableHead>PPL</TableHead>
-                <TableHead className="min-w-44">
+                <TableHead>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span>Total</span>
@@ -1940,12 +1948,12 @@ const SurveyDetailPage = () => {
             <TableBody>
               {paginatedRegions.map((row) => (
                 <TableRow key={row.full_code}>
-                  <TableCell>
+                  {/* <TableCell>
                     {row.level_1_label || row.level_1 || "-"}
                   </TableCell>
                   <TableCell>
                     {row.level_2_label || row.level_2 || "-"}
-                  </TableCell>
+                  </TableCell> */}
                   <TableCell>
                     {row.level_3_label || row.level_3 || "-"}
                   </TableCell>
