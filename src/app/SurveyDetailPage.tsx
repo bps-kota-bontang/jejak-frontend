@@ -114,6 +114,26 @@ type RegionSortBy =
   | "usaha"
   | "progress";
 type RegionSortDir = "asc" | "desc";
+type RecapTab = "region" | "pj" | "pml" | "ppl";
+
+type OfficerRecapRow = {
+  name: string;
+  open_count: number;
+  draft_count: number;
+  submitted_count: number;
+  approved_count: number;
+  rejected_count: number;
+  revoked_count: number;
+  assignment_count: number;
+  progress: number;
+  usaha: number;
+};
+
+type OfficerRecapByRole = {
+  pj: OfficerRecapRow[];
+  pml: OfficerRecapRow[];
+  ppl: OfficerRecapRow[];
+};
 
 const REGION_STATUS_FILTER_OPTIONS: {
   value: RegionStatusFilter;
@@ -138,6 +158,119 @@ const REGION_SORT_OPTIONS: { value: RegionSortBy; label: string }[] = [
   { value: "usaha", label: "Usaha (Terbanyak)" },
   { value: "progress", label: "Progress (Tertinggi)" },
 ];
+
+function toOfficerRecapName(value?: string): string {
+  const trimmed = (value || "").trim();
+  if (!trimmed) {
+    return "-";
+  }
+  return trimmed;
+}
+
+function toProgressPercent(done: number, total: number): number {
+  if (total <= 0) {
+    return 0;
+  }
+  return (done / total) * 100;
+}
+
+function aggregateOfficerRecapByName(
+  rows: SurveyRegion[],
+  nameGetter: (row: SurveyRegion) => string,
+): OfficerRecapRow[] {
+  const grouped = new Map<string, OfficerRecapRow>();
+
+  for (const row of rows) {
+    const name = toOfficerRecapName(nameGetter(row));
+    const key = name.toLowerCase();
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        name,
+        open_count: 0,
+        draft_count: 0,
+        submitted_count: 0,
+        approved_count: 0,
+        rejected_count: 0,
+        revoked_count: 0,
+        assignment_count: 0,
+        progress: 0,
+        usaha: 0,
+      });
+    }
+
+    const current = grouped.get(key)!;
+    current.open_count += row.open_count ?? 0;
+    current.draft_count += row.draft_count ?? 0;
+    current.submitted_count += row.submitted_count ?? 0;
+    current.approved_count += row.approved_count ?? 0;
+    current.rejected_count += row.rejected_count ?? 0;
+    current.revoked_count += row.revoked_count ?? 0;
+    current.assignment_count += row.assignment_count ?? 0;
+    current.usaha += row.usaha ?? 0;
+  }
+
+  return Array.from(grouped.values()).map((item) => {
+    const done =
+      item.draft_count +
+      item.submitted_count +
+      item.approved_count +
+      item.rejected_count +
+      item.revoked_count;
+    return {
+      ...item,
+      progress: toProgressPercent(done, item.assignment_count),
+    };
+  });
+}
+
+function sortOfficerRecapRows(
+  rows: OfficerRecapRow[],
+  sortBy: RegionSortBy,
+  sortDir: RegionSortDir,
+): OfficerRecapRow[] {
+  const result = [...rows];
+  const direction = sortDir === "asc" ? 1 : -1;
+
+  const valueBySort = (row: OfficerRecapRow): number => {
+    switch (sortBy) {
+      case "open":
+        return row.open_count;
+      case "draft":
+        return row.draft_count;
+      case "submitted":
+        return row.submitted_count;
+      case "approved":
+        return row.approved_count;
+      case "rejected":
+        return row.rejected_count;
+      case "revoked":
+        return row.revoked_count;
+      case "total":
+        return row.assignment_count;
+      case "progress":
+        return row.progress;
+      case "usaha":
+        return row.usaha;
+      default:
+        return 0;
+    }
+  };
+
+  result.sort((a, b) => {
+    if (sortBy === "default") {
+      return a.name.localeCompare(b.name, "id");
+    }
+
+    const diff = valueBySort(a) - valueBySort(b);
+    if (diff === 0) {
+      return a.name.localeCompare(b.name, "id");
+    }
+
+    return diff * direction;
+  });
+
+  return result;
+}
 
 function parseRegionPageParam(rawValue: string | null): number {
   const value = Number(rawValue || "1");
@@ -345,6 +478,10 @@ const SurveyDetailPage = () => {
   );
   const [regionTotal, setRegionTotal] = useState(0);
   const [regionTotalPages, setRegionTotalPages] = useState(1);
+  const [recapTab, setRecapTab] = useState<RecapTab>("region");
+  const [officerRecapByRole, setOfficerRecapByRole] =
+    useState<OfficerRecapByRole>({ pj: [], pml: [], ppl: [] });
+  const [officerRecapLoading, setOfficerRecapLoading] = useState(false);
   const [assignmentAvailabilityFilter, setAssignmentAvailabilityFilter] =
     useState<AssignmentAvailabilityFilter>(() =>
       parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
@@ -466,6 +603,50 @@ const SurveyDetailPage = () => {
 
   const currentRegionPage = Math.max(1, regionPage);
 
+  const regionFilterBase = useMemo<SurveyRegionFilter>(
+    () => ({
+      region_level_1: effectiveLevel1Filter,
+      region_level_2: effectiveLevel2Filter,
+      region_level_3: regionCodeFilters.kdkec,
+      region_level_4: regionCodeFilters.kddesa,
+      region_level_5: regionCodeFilters.kdsls,
+      region_level_6: regionCodeFilters.kdsubsls,
+      pj: regionCodeFilters.pj,
+      pml: regionCodeFilters.pml,
+      ppl: regionCodeFilters.ppl,
+      assignment_filter:
+        assignmentAvailabilityFilter === "all"
+          ? undefined
+          : assignmentAvailabilityFilter,
+      status_filter:
+        regionStatusFilters.length === 0
+          ? undefined
+          : regionStatusFilters.join(","),
+    }),
+    [
+      assignmentAvailabilityFilter,
+      effectiveLevel1Filter,
+      effectiveLevel2Filter,
+      regionCodeFilters.kddesa,
+      regionCodeFilters.kdkec,
+      regionCodeFilters.kdsls,
+      regionCodeFilters.kdsubsls,
+      regionCodeFilters.pj,
+      regionCodeFilters.pml,
+      regionCodeFilters.ppl,
+      regionStatusFilters,
+    ],
+  );
+
+  const regionPageFilter = useMemo<SurveyRegionFilter>(
+    () => ({
+      ...regionFilterBase,
+      sort_by: regionSortBy === "default" ? undefined : regionSortBy,
+      sort_dir: regionSortBy === "default" ? undefined : regionSortDir,
+    }),
+    [regionFilterBase, regionSortBy, regionSortDir],
+  );
+
   const visibleRegionPaginationItems = useMemo<(number | "ellipsis")[]>(() => {
     if (regionTotalPages <= 7) {
       return Array.from({ length: regionTotalPages }, (_, index) => index + 1);
@@ -560,32 +741,14 @@ const SurveyDetailPage = () => {
 
     const loadRegionPage = async () => {
       try {
-        const filter: SurveyRegionFilter = {
-          region_level_1: effectiveLevel1Filter,
-          region_level_2: effectiveLevel2Filter,
-          region_level_3: regionCodeFilters.kdkec,
-          region_level_4: regionCodeFilters.kddesa,
-          region_level_5: regionCodeFilters.kdsls,
-          region_level_6: regionCodeFilters.kdsubsls,
-          pj: regionCodeFilters.pj,
-          pml: regionCodeFilters.pml,
-          ppl: regionCodeFilters.ppl,
-          assignment_filter:
-            assignmentAvailabilityFilter === "all"
-              ? undefined
-              : assignmentAvailabilityFilter,
-          status_filter:
-            regionStatusFilters.length === 0
-              ? undefined
-              : regionStatusFilters.join(","),
-          sort_by: regionSortBy === "default" ? undefined : regionSortBy,
-          sort_dir: regionSortBy === "default" ? undefined : regionSortDir,
-        };
-
-        const result = await fetchSurveyRegionsPage(surveyPeriodId, filter, {
+        const result = await fetchSurveyRegionsPage(
+          surveyPeriodId,
+          regionPageFilter,
+          {
           page: currentRegionPage,
           per_page: regionPageSize,
-        });
+          },
+        );
 
         if (!active) {
           return;
@@ -612,23 +775,103 @@ const SurveyDetailPage = () => {
       active = false;
     };
   }, [
-    assignmentAvailabilityFilter,
-    regionStatusFilters,
-    regionSortBy,
-    regionSortDir,
     currentRegionPage,
-    effectiveLevel1Filter,
-    effectiveLevel2Filter,
-    regionCodeFilters.kddesa,
-    regionCodeFilters.kdkec,
-    regionCodeFilters.kdsls,
-    regionCodeFilters.kdsubsls,
-    regionCodeFilters.pj,
-    regionCodeFilters.pml,
-    regionCodeFilters.ppl,
+    regionPageFilter,
     regionPageSize,
     surveyPeriodId,
   ]);
+
+  useEffect(() => {
+    if (!surveyPeriodId) {
+      return;
+    }
+
+    let active = true;
+
+    const loadOfficerRecap = async () => {
+      setOfficerRecapLoading(true);
+      try {
+        const perPage = 1000;
+        const firstPage = await fetchSurveyRegionsPage(
+          surveyPeriodId,
+          regionFilterBase,
+          {
+            page: 1,
+            per_page: perPage,
+          },
+        );
+
+        const allRows: SurveyRegion[] = [...firstPage.items];
+        for (let page = 2; page <= firstPage.meta.pages; page++) {
+          const nextPage = await fetchSurveyRegionsPage(
+            surveyPeriodId,
+            regionFilterBase,
+            {
+              page,
+              per_page: perPage,
+            },
+          );
+          if (!active) {
+            return;
+          }
+          allRows.push(...nextPage.items);
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setOfficerRecapByRole({
+          pj: aggregateOfficerRecapByName(allRows, (row) => row.pj || ""),
+          pml: aggregateOfficerRecapByName(allRows, (row) => row.pml || ""),
+          ppl: aggregateOfficerRecapByName(allRows, (row) => row.ppl || ""),
+        });
+      } catch {
+        if (!active) {
+          return;
+        }
+        setOfficerRecapByRole({ pj: [], pml: [], ppl: [] });
+      } finally {
+        if (active) {
+          setOfficerRecapLoading(false);
+        }
+      }
+    };
+
+    void loadOfficerRecap();
+
+    return () => {
+      active = false;
+    };
+  }, [regionFilterBase, surveyPeriodId]);
+
+  const sortedOfficerRecapByRole = useMemo<OfficerRecapByRole>(
+    () => ({
+      pj: sortOfficerRecapRows(officerRecapByRole.pj, regionSortBy, regionSortDir),
+      pml: sortOfficerRecapRows(officerRecapByRole.pml, regionSortBy, regionSortDir),
+      ppl: sortOfficerRecapRows(officerRecapByRole.ppl, regionSortBy, regionSortDir),
+    }),
+    [officerRecapByRole, regionSortBy, regionSortDir],
+  );
+
+  const officerRecapSections = useMemo(
+    () => ({
+      pj: { label: "Rekap PJ", rows: sortedOfficerRecapByRole.pj },
+      pml: { label: "Rekap PML", rows: sortedOfficerRecapByRole.pml },
+      ppl: { label: "Rekap PPL", rows: sortedOfficerRecapByRole.ppl },
+    }),
+    [sortedOfficerRecapByRole],
+  );
+
+  const selectedOfficerRecapSection = useMemo(() => {
+    if (recapTab === "pj") {
+      return officerRecapSections.pj;
+    }
+    if (recapTab === "pml") {
+      return officerRecapSections.pml;
+    }
+    return officerRecapSections.ppl;
+  }, [officerRecapSections, recapTab]);
 
   useEffect(() => {
     const nextSearchParams = new URLSearchParams(searchParams);
@@ -1913,6 +2156,43 @@ const SurveyDetailPage = () => {
 
           </div>
 
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant={recapTab === "region" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setRecapTab("region")}
+            >
+              Rekap Region
+            </Button>
+            <Button
+              type="button"
+              variant={recapTab === "pj" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setRecapTab("pj")}
+            >
+              Rekap PJ
+            </Button>
+            <Button
+              type="button"
+              variant={recapTab === "pml" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setRecapTab("pml")}
+            >
+              Rekap PML
+            </Button>
+            <Button
+              type="button"
+              variant={recapTab === "ppl" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setRecapTab("ppl")}
+            >
+              Rekap PPL
+            </Button>
+          </div>
+
+          {recapTab === "region" && (
+            <>
           <Table>
             <TableHeader>
               <TableRow>
@@ -2332,6 +2612,155 @@ const SurveyDetailPage = () => {
               </Pagination>
             </div>
           </div>
+
+            </>
+          )}
+
+          {recapTab !== "region" && (
+            <>
+              <div className="space-y-2 border-t pt-4">
+                <h4 className="text-sm font-semibold">{selectedOfficerRecapSection.label}</h4>
+                <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead rowSpan={2}>Nama</TableHead>
+                        <TableHead colSpan={8} className="p-0">
+                          <div className="flex h-full items-center justify-center gap-2 py-2 text-center font-semibold">
+                            <span>Assignment</span>
+                          </div>
+                        </TableHead>
+                        <TableHead rowSpan={2} className="text-center! align-middle!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("usaha")}
+                          >
+                            <span>Usaha</span>
+                            <span className="text-[11px]">{getSortIndicator("usaha")}</span>
+                          </button>
+                        </TableHead>
+                      </TableRow>
+                      <TableRow>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("open")}
+                          >
+                            <span>Open</span>
+                            <span className="text-[11px]">{getSortIndicator("open")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("draft")}
+                          >
+                            <span>Draft</span>
+                            <span className="text-[11px]">{getSortIndicator("draft")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("submitted")}
+                          >
+                            <span>Submitted</span>
+                            <span className="text-[11px]">{getSortIndicator("submitted")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("approved")}
+                          >
+                            <span>Approved</span>
+                            <span className="text-[11px]">{getSortIndicator("approved")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("rejected")}
+                          >
+                            <span>Rejected</span>
+                            <span className="text-[11px]">{getSortIndicator("rejected")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("revoked")}
+                          >
+                            <span>Revoked</span>
+                            <span className="text-[11px]">{getSortIndicator("revoked")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("total")}
+                          >
+                            <span>Total</span>
+                            <span className="text-[11px]">{getSortIndicator("total")}</span>
+                          </button>
+                        </TableHead>
+                        <TableHead className="text-center!">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-1 font-semibold"
+                            onClick={() => handleRegionHeaderSort("progress")}
+                          >
+                            <span>Progress</span>
+                            <span className="text-[11px]">{getSortIndicator("progress")}</span>
+                          </button>
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {officerRecapLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={10} className="text-center text-sm text-muted-foreground">
+                            Memuat {selectedOfficerRecapSection.label.toLowerCase()}...
+                          </TableCell>
+                        </TableRow>
+                      ) : selectedOfficerRecapSection.rows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={10} className="text-center text-sm text-muted-foreground">
+                            Tidak ada data {selectedOfficerRecapSection.label.toLowerCase()}.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        selectedOfficerRecapSection.rows.map((row) => (
+                          <TableRow key={`${recapTab}-${row.name}`}>
+                            <TableCell className="align-middle">{row.name}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.open_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.draft_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.submitted_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.approved_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.rejected_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.revoked_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.assignment_count}</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.progress.toFixed(1)}%</TableCell>
+                            <TableCell className="text-center! align-middle!">{row.usaha}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                </Table>
+
+                <p className="text-xs text-muted-foreground">
+                  Menampilkan {selectedOfficerRecapSection.rows.length} nama pada {selectedOfficerRecapSection.label.toLowerCase()}.
+                </p>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </main>
