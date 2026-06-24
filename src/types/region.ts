@@ -5,11 +5,13 @@ export type SurveyRegion = {
   region_group_id: string;
   assignment_count: number;
   usaha: number;
+  open_count: number;
   draft_count: number;
   submitted_count: number;
   approved_count: number;
   rejected_count: number;
   revoked_count: number;
+  progress: number;
   level_1?: string;
   level_2?: string;
   level_3?: string;

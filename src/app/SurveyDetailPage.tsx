@@ -104,13 +104,15 @@ type RegionStatusFilter =
   | "revoked";
 type RegionSortBy =
   | "default"
+  | "open"
   | "draft"
   | "submitted"
   | "approved"
   | "rejected"
   | "revoked"
   | "total"
-  | "usaha";
+  | "usaha"
+  | "progress";
 type RegionSortDir = "asc" | "desc";
 
 const REGION_STATUS_FILTER_OPTIONS: {
@@ -126,6 +128,7 @@ const REGION_STATUS_FILTER_OPTIONS: {
 
 const REGION_SORT_OPTIONS: { value: RegionSortBy; label: string }[] = [
   { value: "default", label: "Default (Kode Wilayah)" },
+  { value: "open", label: "Open (Terbanyak)" },
   { value: "draft", label: "Draft (Terbanyak)" },
   { value: "submitted", label: "Submitted (Terbanyak)" },
   { value: "approved", label: "Approved (Terbanyak)" },
@@ -133,6 +136,7 @@ const REGION_SORT_OPTIONS: { value: RegionSortBy; label: string }[] = [
   { value: "revoked", label: "Revoked (Terbanyak)" },
   { value: "total", label: "Total (Terbanyak)" },
   { value: "usaha", label: "Usaha (Terbanyak)" },
+  { value: "progress", label: "Progress (Tertinggi)" },
 ];
 
 function parseRegionPageParam(rawValue: string | null): number {
@@ -1921,7 +1925,7 @@ const SurveyDetailPage = () => {
                 <TableHead rowSpan={2}>PJ</TableHead>
                 <TableHead rowSpan={2}>PML</TableHead>
                 <TableHead rowSpan={2}>PPL</TableHead>
-                <TableHead colSpan={6} className="p-0">
+                <TableHead colSpan={8} className="p-0">
                   <div className="flex h-full items-center justify-center gap-2 py-2 text-center font-semibold">
                     <span>Assignment</span>
                     <Popover>
@@ -2036,6 +2040,16 @@ const SurveyDetailPage = () => {
                   <button
                     type="button"
                     className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("open")}
+                  >
+                    <span>Open</span>
+                    <span className="text-[11px]">{getSortIndicator("open")}</span>
+                  </button>
+                </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
                     onClick={() => handleRegionHeaderSort("draft")}
                   >
                     <span>Draft</span>
@@ -2099,6 +2113,16 @@ const SurveyDetailPage = () => {
                     )}
                   </button>
                 </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("progress")}
+                  >
+                    <span>Progress</span>
+                    <span className="text-[11px]">{getSortIndicator("progress")}</span>
+                  </button>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -2136,6 +2160,9 @@ const SurveyDetailPage = () => {
                     {row.ppl || "-"}
                   </TableCell>
                   <TableCell className="text-center! align-middle!">
+                    {row.open_count ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
                     {row.draft_count ?? 0}
                   </TableCell>
                   <TableCell className="text-center! align-middle!">
@@ -2152,6 +2179,9 @@ const SurveyDetailPage = () => {
                   </TableCell>
                   <TableCell className="text-center! align-middle!">
                     {row.assignment_count}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.progress != null ? `${row.progress.toFixed(1)}%` : "-"}
                   </TableCell>
                   <TableCell className="text-center! align-middle!">
                     {usahaValue ?? 0}
