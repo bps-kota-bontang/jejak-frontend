@@ -16,6 +16,8 @@ export type SurveyRegionFilter = {
   ppl?: string;
   assignment_filter?: "has" | "none";
   status_filter?: string;
+  sort_by?: "draft" | "submitted" | "approved" | "rejected" | "revoked" | "total" | "usaha";
+  sort_dir?: "asc" | "desc";
 };
 
 export type SurveyRegionPagination = {

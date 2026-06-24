@@ -17,6 +17,7 @@ import {
   importSurveyRegions,
   syncSurveyRegions,
   type RegionFilterOptionsResponse,
+  type SurveyRegionFilter,
 } from "@/services/region";
 import {
   connectSurveyToExtension,
@@ -101,6 +102,16 @@ type RegionStatusFilter =
   | "approved"
   | "rejected"
   | "revoked";
+type RegionSortBy =
+  | "default"
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "rejected"
+  | "revoked"
+  | "total"
+  | "usaha";
+type RegionSortDir = "asc" | "desc";
 
 const REGION_STATUS_FILTER_OPTIONS: {
   value: RegionStatusFilter;
@@ -111,6 +122,17 @@ const REGION_STATUS_FILTER_OPTIONS: {
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
   { value: "revoked", label: "Revoked" },
+];
+
+const REGION_SORT_OPTIONS: { value: RegionSortBy; label: string }[] = [
+  { value: "default", label: "Default (Kode Wilayah)" },
+  { value: "draft", label: "Draft (Terbanyak)" },
+  { value: "submitted", label: "Submitted (Terbanyak)" },
+  { value: "approved", label: "Approved (Terbanyak)" },
+  { value: "rejected", label: "Rejected (Terbanyak)" },
+  { value: "revoked", label: "Revoked (Terbanyak)" },
+  { value: "total", label: "Total (Terbanyak)" },
+  { value: "usaha", label: "Usaha (Terbanyak)" },
 ];
 
 function parseRegionPageParam(rawValue: string | null): number {
@@ -170,6 +192,27 @@ function parseRegionStatusFilter(
   return REGION_STATUS_FILTER_OPTIONS.map((item) => item.value).filter(
     (value) => selected.has(value),
   );
+}
+
+function parseRegionSortBy(rawValue: string | null): RegionSortBy {
+  if (!rawValue) {
+    return "default";
+  }
+
+  const value = rawValue.trim().toLowerCase() as RegionSortBy;
+  if (REGION_SORT_OPTIONS.some((item) => item.value === value)) {
+    return value;
+  }
+
+  return "default";
+}
+
+function parseRegionSortDir(rawValue: string | null): RegionSortDir {
+  if (rawValue?.trim().toLowerCase() === "asc") {
+    return "asc";
+  }
+
+  return "desc";
 }
 
 function normalizeRegionCodeFilters(
@@ -305,6 +348,12 @@ const SurveyDetailPage = () => {
   const [regionStatusFilters, setRegionStatusFilters] = useState<
     RegionStatusFilter[]
   >(() => parseRegionStatusFilter(searchParams.get("status")));
+  const [regionSortBy, setRegionSortBy] = useState<RegionSortBy>(() =>
+    parseRegionSortBy(searchParams.get("sort")),
+  );
+  const [regionSortDir, setRegionSortDir] = useState<RegionSortDir>(() =>
+    parseRegionSortDir(searchParams.get("dir")),
+  );
   const [backendFasihAvailable, setBackendFasihAvailable] = useState(false);
   const [backendFasihLoading, setBackendFasihLoading] = useState(true);
   const [regionFilterOptions, setRegionFilterOptions] =
@@ -507,7 +556,7 @@ const SurveyDetailPage = () => {
 
     const loadRegionPage = async () => {
       try {
-        const filter = {
+        const filter: SurveyRegionFilter = {
           region_level_1: effectiveLevel1Filter,
           region_level_2: effectiveLevel2Filter,
           region_level_3: regionCodeFilters.kdkec,
@@ -525,6 +574,8 @@ const SurveyDetailPage = () => {
             regionStatusFilters.length === 0
               ? undefined
               : regionStatusFilters.join(","),
+          sort_by: regionSortBy === "default" ? undefined : regionSortBy,
+          sort_dir: regionSortBy === "default" ? undefined : regionSortDir,
         };
 
         const result = await fetchSurveyRegionsPage(surveyPeriodId, filter, {
@@ -559,6 +610,8 @@ const SurveyDetailPage = () => {
   }, [
     assignmentAvailabilityFilter,
     regionStatusFilters,
+    regionSortBy,
+    regionSortDir,
     currentRegionPage,
     effectiveLevel1Filter,
     effectiveLevel2Filter,
@@ -619,6 +672,14 @@ const SurveyDetailPage = () => {
       nextSearchParams.set("status", regionStatusFilters.join(","));
     }
 
+    if (regionSortBy === "default") {
+      nextSearchParams.delete("sort");
+      nextSearchParams.delete("dir");
+    } else {
+      nextSearchParams.set("sort", regionSortBy);
+      nextSearchParams.set("dir", regionSortDir);
+    }
+
     if (currentRegionPage <= 1) {
       nextSearchParams.delete("page");
     } else {
@@ -639,6 +700,8 @@ const SurveyDetailPage = () => {
   }, [
     assignmentAvailabilityFilter,
     regionStatusFilters,
+    regionSortBy,
+    regionSortDir,
     effectiveLevel1Filter,
     effectiveLevel2Filter,
     regionCodeFilters.kddesa,
@@ -683,6 +746,8 @@ const SurveyDetailPage = () => {
       parseAssignmentAvailabilityFilter(searchParams.get("assignment")),
     );
     setRegionStatusFilters(parseRegionStatusFilter(searchParams.get("status")));
+    setRegionSortBy(parseRegionSortBy(searchParams.get("sort")));
+    setRegionSortDir(parseRegionSortDir(searchParams.get("dir")));
   }, [survey]); // Only run once after survey is loaded
 
   // Refetch filter options when region filters change for cascading effect
@@ -1253,7 +1318,28 @@ const SurveyDetailPage = () => {
     setRegionCodeFilters(buildInitialRegionFilters(survey));
     setAssignmentAvailabilityFilter("all");
     setRegionStatusFilters([]);
+    setRegionSortBy("default");
+    setRegionSortDir("desc");
     setRegionPage(1);
+  }
+
+  function handleRegionHeaderSort(nextSortBy: Exclude<RegionSortBy, "default">) {
+    if (regionSortBy === nextSortBy) {
+      setRegionSortDir((current) => (current === "desc" ? "asc" : "desc"));
+    } else {
+      setRegionSortBy(nextSortBy);
+      setRegionSortDir("desc");
+    }
+
+    setRegionPage(1);
+  }
+
+  function getSortIndicator(target: Exclude<RegionSortBy, "default">): string {
+    if (regionSortBy !== target) {
+      return "↕";
+    }
+
+    return regionSortDir === "desc" ? "↓" : "↑";
   }
 
   function handleAssignmentAvailabilityFilterChange(
@@ -1820,6 +1906,7 @@ const SurveyDetailPage = () => {
                 placeholder="Filter PPL"
               />
             </Label>
+
           </div>
 
           <Table>
@@ -1827,23 +1914,16 @@ const SurveyDetailPage = () => {
               <TableRow>
                 {/* <TableHead>Provinsi</TableHead>
                 <TableHead>Kabupaten/Kota</TableHead> */}
-                <TableHead>Kecamatan</TableHead>
-                <TableHead>Desa/Kelurahan</TableHead>
-                <TableHead>SLS</TableHead>
-                <TableHead>Sub SLS</TableHead>
-                <TableHead>PJ</TableHead>
-                <TableHead>PML</TableHead>
-                <TableHead>PPL</TableHead>
-                <TableHead>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span>Total</span>
-                      {selectedStatusCount > 0 && (
-                        <Badge variant="outline" className="text-[10px]">
-                          {selectedStatusCount} status
-                        </Badge>
-                      )}
-                    </div>
+                <TableHead rowSpan={2}>Kecamatan</TableHead>
+                <TableHead rowSpan={2}>Desa/Kelurahan</TableHead>
+                <TableHead rowSpan={2}>SLS</TableHead>
+                <TableHead rowSpan={2}>Sub SLS</TableHead>
+                <TableHead rowSpan={2}>PJ</TableHead>
+                <TableHead rowSpan={2}>PML</TableHead>
+                <TableHead rowSpan={2}>PPL</TableHead>
+                <TableHead colSpan={6} className="p-0">
+                  <div className="flex h-full items-center justify-center gap-2 py-2 text-center font-semibold">
+                    <span>Assignment</span>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button
@@ -1937,44 +2017,147 @@ const SurveyDetailPage = () => {
                     </Popover>
                   </div>
                 </TableHead>
-                <TableHead>Draft</TableHead>
-                <TableHead>Submitted</TableHead>
-                <TableHead>Approved</TableHead>
-                <TableHead>Rejected</TableHead>
-                <TableHead>Revoked</TableHead>
-                <TableHead>Aksi</TableHead>
+                <TableHead rowSpan={2} className="text-center! align-middle!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("usaha")}
+                  >
+                    <span>Usaha</span>
+                    <span className="text-[11px]">{getSortIndicator("usaha")}</span>
+                  </button>
+                </TableHead>
+                <TableHead rowSpan={2} className="text-center! align-middle!">
+                  Aksi
+                </TableHead>
+              </TableRow>
+              <TableRow>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("draft")}
+                  >
+                    <span>Draft</span>
+                    <span className="text-[11px]">{getSortIndicator("draft")}</span>
+                  </button>
+                </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("submitted")}
+                  >
+                    <span>Submitted</span>
+                    <span className="text-[11px]">
+                      {getSortIndicator("submitted")}
+                    </span>
+                  </button>
+                </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("approved")}
+                  >
+                    <span>Approved</span>
+                    <span className="text-[11px]">{getSortIndicator("approved")}</span>
+                  </button>
+                </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("rejected")}
+                  >
+                    <span>Rejected</span>
+                    <span className="text-[11px]">{getSortIndicator("rejected")}</span>
+                  </button>
+                </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-1 font-semibold"
+                    onClick={() => handleRegionHeaderSort("revoked")}
+                  >
+                    <span>Revoked</span>
+                    <span className="text-[11px]">{getSortIndicator("revoked")}</span>
+                  </button>
+                </TableHead>
+                <TableHead className="text-center!">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-2 font-semibold"
+                    onClick={() => handleRegionHeaderSort("total")}
+                  >
+                    <span>Total</span>
+                    <span className="text-[11px]">{getSortIndicator("total")}</span>
+                    {selectedStatusCount > 0 && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {selectedStatusCount} status
+                      </Badge>
+                    )}
+                  </button>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginatedRegions.map((row) => (
-                <TableRow key={row.full_code}>
+              {paginatedRegions.map((row) => {
+                const usahaValue = (row as SurveyRegion & { usaha?: number })
+                  .usaha;
+
+                return (
+                  <TableRow key={row.full_code}>
                   {/* <TableCell>
                     {row.level_1_label || row.level_1 || "-"}
                   </TableCell>
                   <TableCell>
                     {row.level_2_label || row.level_2 || "-"}
                   </TableCell> */}
-                  <TableCell>
+                  <TableCell className="text-center align-middle">
                     {row.level_3_label || row.level_3 || "-"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="text-center align-middle">
                     {row.level_4_label || row.level_4 || "-"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="text-center align-middle">
                     {row.level_5_label || row.level_5 || "-"}
                   </TableCell>
-                  <TableCell>{row.level_6 || "-"}</TableCell>
-                  <TableCell>{row.pj || "-"}</TableCell>
-                  <TableCell>{row.pml || "-"}</TableCell>
-                  <TableCell>{row.ppl || "-"}</TableCell>
-                  <TableCell>{row.assignment_count}</TableCell>
-                  <TableCell>{row.draft_count ?? 0}</TableCell>
-                  <TableCell>{row.submitted_count ?? 0}</TableCell>
-                  <TableCell>{row.approved_count ?? 0}</TableCell>
-                  <TableCell>{row.rejected_count ?? 0}</TableCell>
-                  <TableCell>{row.revoked_count ?? 0}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
+                  <TableCell className="text-center align-middle">
+                    {row.level_6 || "-"}
+                  </TableCell>
+                  <TableCell className="text-center align-middle">
+                    {row.pj || "-"}
+                  </TableCell>
+                  <TableCell className="text-center align-middle">
+                    {row.pml || "-"}
+                  </TableCell>
+                  <TableCell className="text-center align-middle">
+                    {row.ppl || "-"}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.draft_count ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.submitted_count ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.approved_count ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.rejected_count ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.revoked_count ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {row.assignment_count}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    {usahaValue ?? 0}
+                  </TableCell>
+                  <TableCell className="text-center! align-middle!">
+                    <div className="flex w-full flex-wrap justify-center gap-2">
                       <Button asChild size="sm" variant="outline">
                         <Link
                           to={`/surveys/${surveyPeriodId}/regions/${row.full_code}`}
@@ -2017,8 +2200,9 @@ const SurveyDetailPage = () => {
                       </Button>
                     </div>
                   </TableCell>
-                </TableRow>
-              ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
 
